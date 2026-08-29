@@ -2,11 +2,8 @@ package com.dentalclinic.view;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Insets;
+import java.awt.GridLayout;
 import java.awt.event.ActionListener;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -20,79 +17,74 @@ import javax.swing.SwingConstants;
 /**
  * PRESENTATION TIER - staff login window.
  *
- * This class is deliberately passive. It builds components, exposes getters
- * for what the user typed, and exposes addXxxListener methods so the
- * LoginController can attach behaviour (Observer pattern).
+ * This class is passive. It builds components, exposes getters for what the
+ * user typed, and exposes addXxxListener methods so LoginController can
+ * attach behaviour (Observer pattern). It has no validation logic and no
+ * database code.
  *
- * It contains no validation logic and no database code.
+ * LAYOUT: BorderLayout for the window, GridLayout for the form. GridLayout
+ * gives every cell an identical size and stretches components to fill it,
+ * so the text fields size correctly with no extra constraints.
+ *
+ * @author [Your Name]
  */
 public class LoginView extends JFrame {
 
-    private final JTextField     txtUsername = new JTextField(16);
-    private final JPasswordField txtPassword = new JPasswordField(16);
+    private final JTextField     txtUsername = new JTextField();
+    private final JPasswordField txtPassword = new JPasswordField();
     private final JButton        btnLogin    = new JButton("Login");
     private final JButton        btnCancel   = new JButton("Cancel");
     private final JLabel         lblMessage  = new JLabel(" ", SwingConstants.CENTER);
 
     public LoginView() {
         setTitle("Sunrise Dental Clinic - Staff Login");
-        setSize(430, 260);
-        setResizable(false);
+        setSize(400, 250);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);           // centre on screen
-        setLayout(new BorderLayout(10, 10));
+        setLocationRelativeTo(null);          // centre on screen
+        setLayout(new BorderLayout());
 
-        add(buildHeader(),  BorderLayout.NORTH);
-        add(buildForm(),    BorderLayout.CENTER);
-        add(buildFooter(),  BorderLayout.SOUTH);
+        add(buildHeader(), BorderLayout.NORTH);
+        add(buildForm(),   BorderLayout.CENTER);
+        add(buildFooter(), BorderLayout.SOUTH);
 
         getRootPane().setDefaultButton(btnLogin);   // Enter key submits
     }
 
+    /** Title bar across the top. */
     private JPanel buildHeader() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(new Color(23, 58, 95));
-        panel.setPreferredSize(new Dimension(430, 60));
-
         JLabel title = new JLabel("Sunrise Dental Clinic", SwingConstants.CENTER);
-        title.setFont(new Font("SansSerif", Font.BOLD, 20));
+        title.setFont(new Font("SansSerif", Font.BOLD, 18));
         title.setForeground(Color.WHITE);
 
-        JLabel subtitle = new JLabel("Appointment Management System", SwingConstants.CENTER);
-        subtitle.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        subtitle.setForeground(new Color(200, 215, 230));
-
-        panel.add(title,    BorderLayout.CENTER);
-        panel.add(subtitle, BorderLayout.SOUTH);
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(new Color(23, 58, 95));
+        panel.setBorder(BorderFactory.createEmptyBorder(12, 10, 12, 10));
+        panel.add(title, BorderLayout.CENTER);
         return panel;
     }
 
+    /**
+     * Two rows, two columns: label then field.
+     * GridLayout stretches each component to fill its cell, which is why
+     * the fields need no column count or fill constraint.
+     */
     private JPanel buildForm() {
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(15, 30, 5, 30));
+        JPanel form = new JPanel(new GridLayout(2, 2, 10, 12));
+        form.setBorder(BorderFactory.createEmptyBorder(20, 40, 10, 40));
 
-        GridBagConstraints gc = new GridBagConstraints();
-        gc.insets = new Insets(6, 6, 6, 6);
-        gc.anchor = GridBagConstraints.WEST;
+        form.add(new JLabel("Username:"));
+        form.add(txtUsername);
+        form.add(new JLabel("Password:"));
+        form.add(txtPassword);
 
-        gc.gridx = 0; gc.gridy = 0;
-        panel.add(new JLabel("Username:"), gc);
-        gc.gridx = 1;
-        panel.add(txtUsername, gc);
-
-        gc.gridx = 0; gc.gridy = 1;
-        panel.add(new JLabel("Password:"), gc);
-        gc.gridx = 1;
-        panel.add(txtPassword, gc);
-
-        return panel;
+        return form;
     }
 
+    /** Error message above, buttons below. */
     private JPanel buildFooter() {
-        lblMessage.setForeground(new Color(180, 30, 30));
-        lblMessage.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        lblMessage.setForeground(Color.RED);
 
-        JPanel buttons = new JPanel();
+        JPanel buttons = new JPanel();          // FlowLayout centres by default
         buttons.add(btnLogin);
         buttons.add(btnCancel);
 
@@ -107,9 +99,14 @@ public class LoginView extends JFrame {
     public String getUsername() { return txtUsername.getText().trim(); }
     public String getPassword() { return new String(txtPassword.getPassword()); }
 
-    // ---------- feedback the controller can push back ----------
-    public void setMessage(String msg)  { lblMessage.setText(msg); }
-    public void clearPassword()         { txtPassword.setText(""); txtPassword.requestFocus(); }
+    // ---------- feedback the controller pushes back ----------
+    public void setMessage(String msg) { lblMessage.setText(msg); }
+
+    public void clearPassword() {
+        txtPassword.setText("");
+        txtPassword.requestFocus();
+    }
+
     public void setBusy(boolean busy) {
         btnLogin.setEnabled(!busy);
         btnLogin.setText(busy ? "Checking..." : "Login");
