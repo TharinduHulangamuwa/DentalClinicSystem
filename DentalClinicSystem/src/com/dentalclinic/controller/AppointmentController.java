@@ -6,6 +6,7 @@ import com.dentalclinic.model.Bill;
 import com.dentalclinic.model.DBConnection;
 import com.dentalclinic.model.User;
 import com.dentalclinic.model.Validator;
+import com.dentalclinic.service.AppointmentRestClient;
 import com.dentalclinic.view.MainView;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -37,7 +38,7 @@ import javax.swing.table.DefaultTableModel;
 public class AppointmentController {
 
     private final MainView       view;
-    private final AppointmentDAO dao = new AppointmentDAO();
+ private final AppointmentRestClient dao = new AppointmentRestClient();
     private final User           loggedInUser;
 
     /** Holds the last successful search so the bill button knows what to bill. */
@@ -252,7 +253,7 @@ public class AppointmentController {
                 loadAppointmentsInBackground();   // refresh the report tab
             }
 
-        } catch (SQLIntegrityConstraintViolationException ex) {
+     } catch (AppointmentRestClient.ConflictException ex) {
             // Safety net: the database constraint caught what the checks above
             // missed, for example if another member of staff booked the same
             // slot a fraction of a second earlier.
