@@ -4,10 +4,13 @@ import com.dentalclinic.model.Appointment;
 import com.dentalclinic.model.AppointmentDAO;
 import com.dentalclinic.model.Bill;
 import com.dentalclinic.model.DBConnection;
+import com.dentalclinic.model.ReminderService;
+import com.dentalclinic.model.Session;
 import com.dentalclinic.model.User;
 import com.dentalclinic.model.Validator;
-import com.dentalclinic.service.AppointmentRestClient;
+import com.dentalclinic.view.LoginView;
 import com.dentalclinic.view.MainView;
+import com.dentalclinic.model.UserDAO;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.sql.SQLIntegrityConstraintViolationException;
@@ -38,7 +41,7 @@ import javax.swing.table.DefaultTableModel;
 public class AppointmentController {
 
     private final MainView       view;
- private final AppointmentRestClient dao = new AppointmentRestClient();
+    private final AppointmentDAO dao = new AppointmentDAO();
     private final User           loggedInUser;
 
     /** Holds the last successful search so the bill button knows what to bill. */
@@ -46,6 +49,9 @@ public class AppointmentController {
 
     /** Reference kept so the clock can be stopped cleanly on exit. */
     private Thread clockThread;
+
+    /** Generates patient reminder notifications. */
+    private final ReminderService reminderService = new ReminderService(new AppointmentDAO());
 
     public AppointmentController(MainView view, User loggedInUser) {
         this.view         = view;
@@ -59,6 +65,9 @@ public class AppointmentController {
         view.addSearchListener(e  -> searchAppointment());
         view.addBillListener(e    -> generateBill());
         view.addRefreshListener(e -> loadAppointmentsInBackground());
+        view.addReportRefreshListener(e -> loadDailyReport());
+        view.addRemindersListener(e -> generateReminders());
+        view.addLogoutListener(e -> logout());
         view.addWindowCloseListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -70,6 +79,7 @@ public class AppointmentController {
         loadTreatments();
         startClockThread();               // THREAD 1
         loadAppointmentsInBackground();   // THREAD 2
+        loadDailyReport();
     }
 
     // =================================================================
@@ -253,7 +263,7 @@ public class AppointmentController {
                 loadAppointmentsInBackground();   // refresh the report tab
             }
 
-     } catch (AppointmentRestClient.ConflictException ex) {
+        } catch (SQLIntegrityConstraintViolationException ex) {
             // Safety net: the database constraint caught what the checks above
             // missed, for example if another member of staff booked the same
             // slot a fraction of a second earlier.
@@ -330,6 +340,114 @@ public class AppointmentController {
     }
 
     // =================================================================
+    // MANAGEMENT REPORT - reads the vw_daily_schedule SQL view
+    //
+    // Loaded on a SwingWorker for the same reason as the appointment
+    // list: an aggregate query over a year of appointments is slow
+    // enough to freeze the window if run on the Event Dispatch Thread.
+    // =================================================================
+    private void loadDailyReport() {
+        new SwingWorker<List<String[]>, Void>() {
+
+            @Override
+            protected List<String[]> doInBackground() throws Exception {
+                return new AppointmentDAO().dailyScheduleReport();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<String[]> rows = get();
+                    DefaultTableModel model = view.getReportTableModel();
+                    model.setRowCount(0);
+                    for (String[] row : rows) {
+                        model.addRow(row);
+                    }
+                } catch (Exception ex) {
+                    view.setStatus("Daily report could not be loaded.");
+                }
+            }
+        }.execute();
+    }
+
+    // =================================================================
+    // PATIENT REMINDERS - generates notification messages
+    //
+    // Runs on a SwingWorker because it queries the database and then
+    // writes a file, either of which could block the interface.
+    // =================================================================
+    private void generateReminders() {
+        view.setStatus("Generating reminders...");
+
+        new SwingWorker<List<String>, Void>() {
+
+            @Override
+            protected List<String> doInBackground() throws Exception {
+                return reminderService.generateTomorrowReminders();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<String> messages = get();
+
+                    if (messages.isEmpty()) {
+                        view.setNotifications("No appointments scheduled for tomorrow.\n\n"
+                                + "Nothing to send.");
+                        view.setStatus("No reminders needed.");
+                        return;
+                    }
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("REMINDER MESSAGES GENERATED\n");
+                    sb.append("===========================\n");
+                    sb.append(messages.size()).append(" message(s) queued for dispatch.\n");
+                    sb.append("Written to the '").append(ReminderService.OUTPUT_FOLDER);
+                    sb.append("' folder inside the project.\n\n");
+
+                    for (int i = 0; i < messages.size(); i++) {
+                        sb.append("[").append(i + 1).append("] ")
+                          .append(messages.get(i)).append("\n\n");
+                    }
+
+                    view.setNotifications(sb.toString());
+                    view.setStatus(messages.size() + " reminder(s) generated.");
+
+                } catch (Exception ex) {
+                    view.setStatus("Reminder generation failed.");
+                    view.showError("Could not generate reminders.\n\n" + ex.getMessage());
+                }
+            }
+        }.execute();
+    }
+
+    // =================================================================
+    // LOGOUT - ends the session and returns to the login screen
+    //
+    // The database connection stays open because the application is
+    // still running; only the session is discarded.
+    // =================================================================
+    private void logout() {
+        int choice = javax.swing.JOptionPane.showConfirmDialog(view,
+                "Log out and return to the login screen?",
+                "Confirm Logout", javax.swing.JOptionPane.YES_NO_OPTION);
+
+        if (choice != javax.swing.JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        if (clockThread != null) {
+            clockThread.interrupt();
+        }
+        Session.end();
+        view.dispose();
+
+        LoginView loginView = new LoginView();
+        new LoginController(loginView, new UserDAO());
+        loginView.setVisible(true);
+    }
+
+    // =================================================================
     // FUNCTIONALITY 6 - EXIT SYSTEM SAFELY
     // =================================================================
     private void exitApplication() {
@@ -341,8 +459,9 @@ public class AppointmentController {
             clockThread.interrupt();
         }
         // Release the shared database connection
+        Session.end();
         DBConnection.close();
-        System.out.println("Session ended for " + loggedInUser.getUsername());
+        System.out.println("Application closed by " + loggedInUser.getUsername());
         System.exit(0);
     }
 }

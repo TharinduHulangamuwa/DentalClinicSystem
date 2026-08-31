@@ -1,5 +1,6 @@
 package com.dentalclinic.controller;
 
+import com.dentalclinic.model.Session;
 import com.dentalclinic.model.User;
 import com.dentalclinic.model.UserDAO;
 import com.dentalclinic.model.Validator;
@@ -80,6 +81,7 @@ public class LoginController {
     }
 
     private void openMainWindow(User user) {
+        Session.start(user);                 // open the staff session
         MainView mainView = new MainView();
         new AppointmentController(mainView, user);   // controller wires itself in
         mainView.setVisible(true);

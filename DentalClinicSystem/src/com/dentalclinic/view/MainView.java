@@ -75,6 +75,24 @@ public class MainView extends JFrame {
     private final JTable  tblAppointments = new JTable(tableModel);
     private final JButton btnRefresh      = new JButton("Refresh from Database");
 
+    // ---------- Tab 4: daily summary report (reads the SQL view) ----------
+    private final DefaultTableModel reportModel = new DefaultTableModel(
+            new String[]{"Date", "Dentist", "Appointments", "Expected Revenue (LKR)"}, 0) {
+        @Override
+        public boolean isCellEditable(int row, int col) {
+            return false;
+        }
+    };
+    private final JTable  tblReport      = new JTable(reportModel);
+    private final JButton btnReportRefresh = new JButton("Refresh Report");
+
+    // ---------- Tab 5: patient reminders ----------
+    private final JTextArea txtNotifications = new JTextArea();
+    private final JButton   btnSendReminders = new JButton("Generate Tomorrow's Reminders");
+
+    // ---------- logout ----------
+    private final JButton btnLogout = new JButton("Logout");
+
     // ---------- status bar ----------
     private final JLabel lblStatus = new JLabel("  Ready");
     private final JLabel lblUser   = new JLabel("", SwingConstants.CENTER);
@@ -92,6 +110,8 @@ public class MainView extends JFrame {
         tabs.addTab("Register Appointment", buildRegisterPanel());
         tabs.addTab("Search & Bill",        buildBillPanel());
         tabs.addTab("All Appointments",     buildReportPanel());
+        tabs.addTab("Daily Summary",        buildSummaryPanel());
+        tabs.addTab("Reminders",            buildNotificationPanel());
         tabs.addTab("Help",                 buildHelpPanel());
 
         add(tabs,             BorderLayout.CENTER);
@@ -190,7 +210,56 @@ public class MainView extends JFrame {
     }
 
     // =================================================================
-    // TAB 4 - functionality 5, instructions for new staff
+    // TAB 4 - management summary report
+    //
+    // Reads the vw_daily_schedule SQL view, which aggregates appointment
+    // counts and expected revenue per dentist per day. This is a report
+    // that supports decision making rather than a raw record listing:
+    // the practice manager can see at a glance which dentists are
+    // over-booked and what revenue each day is expected to produce.
+    // =================================================================
+    private JPanel buildSummaryPanel() {
+        tblReport.setRowHeight(24);
+        tblReport.setAutoCreateRowSorter(true);
+
+        JLabel note = new JLabel(
+            "  Appointments and expected treatment revenue per dentist per day");
+        note.setFont(new Font("SansSerif", Font.ITALIC, 12));
+
+        JPanel south = new JPanel();
+        south.add(btnReportRefresh);
+
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(note, BorderLayout.NORTH);
+        panel.add(new JScrollPane(tblReport), BorderLayout.CENTER);
+        panel.add(south, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    // =================================================================
+    // TAB 5 - patient reminder notifications
+    // =================================================================
+    private JPanel buildNotificationPanel() {
+        txtNotifications.setEditable(false);
+        txtNotifications.setFont(new Font("Monospaced", Font.PLAIN, 12));
+        txtNotifications.setText(
+            "No reminders generated yet.\n\n"
+          + "Click the button below to build reminder messages for every\n"
+          + "patient with an appointment tomorrow. Messages are written to\n"
+          + "the 'reminders' folder inside the project as a dispatch file\n"
+          + "ready for the clinic's SMS provider or mail merge.\n");
+
+        JPanel south = new JPanel();
+        south.add(btnSendReminders);
+
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(new JScrollPane(txtNotifications), BorderLayout.CENTER);
+        panel.add(south, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    // =================================================================
+    // TAB 6 - functionality 5, instructions for new staff
     // =================================================================
     private JPanel buildHelpPanel() {
         JTextArea help = new JTextArea(
@@ -250,14 +319,17 @@ public class MainView extends JFrame {
     // STATUS BAR - the clock label is updated by the background thread
     // =================================================================
     private JPanel buildStatusBar() {
-        JPanel bar = new JPanel(new GridLayout(1, 3));
-        bar.setBorder(BorderFactory.createEtchedBorder());
-
         lblClock.setHorizontalAlignment(SwingConstants.RIGHT);
 
-        bar.add(lblStatus);
-        bar.add(lblUser);
-        bar.add(lblClock);
+        JPanel labels = new JPanel(new GridLayout(1, 3));
+        labels.add(lblStatus);
+        labels.add(lblUser);
+        labels.add(lblClock);
+
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setBorder(BorderFactory.createEtchedBorder());
+        bar.add(labels,    BorderLayout.CENTER);
+        bar.add(btnLogout, BorderLayout.EAST);
         return bar;
     }
 
@@ -274,7 +346,8 @@ public class MainView extends JFrame {
     public String getTime()            { return txtTime.getText().trim(); }
     public String getSearchNo()        { return txtSearchNo.getText().trim(); }
     public String getConsultationFee() { return txtConsultationFee.getText().trim(); }
-    public DefaultTableModel getTableModel() { return tableModel; }
+    public DefaultTableModel getTableModel()       { return tableModel; }
+    public DefaultTableModel getReportTableModel() { return reportModel; }
 
     // =================================================================
     // SETTERS - the controller pushes results back through these
@@ -294,6 +367,11 @@ public class MainView extends JFrame {
     public void setReceipt(String text) {
         txtReceipt.setText(text);
         txtReceipt.setCaretPosition(0);
+    }
+
+    public void setNotifications(String text) {
+        txtNotifications.setText(text);
+        txtNotifications.setCaretPosition(0);
     }
 
     public void setStatus(String text)       { lblStatus.setText("  " + text); }
@@ -338,6 +416,9 @@ public class MainView extends JFrame {
     public void addSearchListener(ActionListener l)  { btnSearch.addActionListener(l); }
     public void addBillListener(ActionListener l)    { btnBill.addActionListener(l); }
     public void addRefreshListener(ActionListener l) { btnRefresh.addActionListener(l); }
+    public void addReportRefreshListener(ActionListener l) { btnReportRefresh.addActionListener(l); }
+    public void addRemindersListener(ActionListener l) { btnSendReminders.addActionListener(l); }
+    public void addLogoutListener(ActionListener l)  { btnLogout.addActionListener(l); }
 
     public void addWindowCloseListener(WindowAdapter adapter) {
         addWindowListener(adapter);

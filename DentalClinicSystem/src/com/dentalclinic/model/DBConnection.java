@@ -65,14 +65,10 @@ public class DBConnection {
 
     /** Simple health check used by the startup self-test. */
     public static boolean isReachable() {
-    try {
-        return getConnection() != null && !getConnection().isClosed();
-    } catch (SQLException e) {
-        System.err.println("=== DATABASE CONNECTION FAILED ===");
-        System.err.println("Message:  " + e.getMessage());
-        System.err.println("SQLState: " + e.getSQLState());
-        System.err.println("Code:     " + e.getErrorCode());
-        return false;
+        try {
+            return getConnection() != null && !getConnection().isClosed();
+        } catch (SQLException e) {
+            return false;
+        }
     }
-}
 }

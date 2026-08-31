@@ -71,6 +71,23 @@ public class AppointmentDAO {
         return list;
     }
 
+
+    /** Appointments on one date, used by the reminder service. */
+    public List<Appointment> findByDate(String date) throws SQLException {
+        List<Appointment> list = new ArrayList<>();
+        String sql = "SELECT * FROM appointments WHERE appointment_date = ? "
+                   + "ORDER BY appointment_time";
+        try (PreparedStatement ps = DBConnection.getConnection().prepareStatement(sql)) {
+            ps.setString(1, date);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    list.add(mapRow(rs));
+                }
+            }
+        }
+        return list;
+    }
+
     /** Powers the "double booking" pre-check before we even attempt the insert. */
     public boolean slotTaken(String dentist, String date, String time) throws SQLException {
         String sql = "SELECT 1 FROM appointments "
@@ -174,4 +191,4 @@ public class AppointmentDAO {
                 rs.getString("appointment_date"),
                 rs.getString("appointment_time"));
     }
-}   
+}
