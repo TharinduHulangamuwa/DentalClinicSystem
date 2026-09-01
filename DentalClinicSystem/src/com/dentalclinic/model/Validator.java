@@ -22,6 +22,9 @@ public final class Validator {
     public static final int OPENING_HOUR = 8;
     public static final int CLOSING_HOUR = 20;
 
+    /** Minimum length for a staff password. */
+    public static final int MIN_PASSWORD_LENGTH = 8;
+
     private Validator() { }
 
     /** Rejects null, empty and whitespace-only values. */
@@ -85,6 +88,33 @@ public final class Validator {
         }
         int hour = Integer.parseInt(time.trim().substring(0, 2));
         return hour >= OPENING_HOUR && hour <= CLOSING_HOUR;
+    }
+
+    /**
+     * A username: 4 to 20 characters, letters, digits, dot and underscore,
+     * starting with a letter. Deliberately narrow, because the username is
+     * used in logs and in the sessions audit trail.
+     */
+    public static boolean isValidUsername(String username) {
+        return username != null && username.trim().matches("[A-Za-z][A-Za-z0-9._]{3,19}");
+    }
+
+    /**
+     * A password of at least 8 characters containing a letter and a digit.
+     *
+     * DESIGN DECISION for the report: this is a deliberately modest rule. A
+     * clinic reception desk is shared and staff change; a rule so strict that
+     * people write passwords on sticky notes is worse than a moderate rule
+     * they will actually follow. The important protections are elsewhere -
+     * passwords are hashed, sessions expire, and tokens can be revoked.
+     */
+    public static boolean isStrongPassword(String password) {
+        if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
+            return false;
+        }
+        boolean hasLetter = password.matches(".*[A-Za-z].*");
+        boolean hasDigit  = password.matches(".*\\d.*");
+        return hasLetter && hasDigit;
     }
 
     /** A consultation fee must parse as a number of zero or more. */

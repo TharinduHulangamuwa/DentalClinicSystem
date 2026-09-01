@@ -58,6 +58,7 @@ public class AppointmentController {
     private final AppointmentDAO dao        = new AppointmentDAO();
     private final SessionDAO     sessionDAO = new SessionDAO();
     private final ReminderService reminders = new ReminderService(new AppointmentDAO());
+    private final UserDAO        userDAO    = new UserDAO();
     private final User loggedInUser;
 
     /** The last successful search, so the bill button knows what to bill. */
@@ -94,12 +95,28 @@ public class AppointmentController {
         view.addEndAllSessionsListener(e -> signOutEverywhere());
         view.addGlobalActivityListener(e -> recordActivity());
 
+        // Staff account management, administrator only
+        view.addCreateUserListener(e    -> createUser());
+        view.addClearUserListener(e     -> view.clearUserForm());
+        view.addResetPasswordListener(e -> resetPassword());
+        view.addChangeRoleListener(e    -> changeRole());
+        view.addDeleteUserListener(e    -> deleteUser());
+        view.addStaffRefreshListener(e  -> loadStaff());
+
         view.addWindowCloseListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
                 exitApplication();
             }
         });
+
+        // ---- role based access ----
+        // A STAFF user never sees the Staff Accounts destination. Hiding the
+        // route is a convenience; the real protection is requireAdmin(),
+        // which refuses each operation regardless of what is on screen.
+        if (!loggedInUser.isAdmin()) {
+            view.removeAdminScreens();
+        }
 
         // ---- startup ----
         loadTreatments();
@@ -115,6 +132,239 @@ public class AppointmentController {
         loadAppointments();
         loadDailyReport();
         suggestNextNumber();
+        if (loggedInUser.isAdmin()) {
+            loadStaff();
+        }
+    }
+
+    // =================================================================
+    // STAFF ACCOUNT MANAGEMENT - administrator only
+    //
+    // Every method here starts with requireAdmin(). Checking in the
+    // controller rather than only hiding the screen matters: hiding a
+    // button is a user interface convenience, not a security control.
+    // =================================================================
+
+    /** @return true if the signed-in user may manage accounts */
+    private boolean requireAdmin() {
+        if (loggedInUser.isAdmin()) {
+            return true;
+        }
+        view.showError("Only an administrator can manage staff accounts.");
+        view.setStatusError("Permission denied.");
+        return false;
+    }
+
+    private void loadStaff() {
+        if (!loggedInUser.isAdmin()) {
+            return;
+        }
+        new SwingWorker<List<String[]>, Void>() {
+            @Override
+            protected List<String[]> doInBackground() throws Exception {
+                return userDAO.staffRows();
+            }
+            @Override
+            protected void done() {
+                try {
+                    DefaultTableModel model = view.getStaffTableModel();
+                    model.setRowCount(0);
+                    for (String[] row : get()) {
+                        model.addRow(row);
+                    }
+                } catch (Exception ex) {
+                    view.setStatusError("Could not load staff accounts.");
+                }
+            }
+        }.execute();
+    }
+
+    private void createUser() {
+        if (!requireAdmin()) {
+            return;
+        }
+
+        view.clearUserFieldErrors();
+        boolean valid = true;
+
+        if (!Validator.isValidUsername(view.getNewUsername())) {
+            view.showUserFieldError("username",
+                    "4-20 chars, must start with a letter");
+            valid = false;
+        }
+        if (!Validator.isValidName(view.getNewFullName())) {
+            view.showUserFieldError("fullName", "Letters and spaces only");
+            valid = false;
+        }
+        if (!Validator.isStrongPassword(view.getNewPassword())) {
+            view.showUserFieldError("password",
+                    "At least " + Validator.MIN_PASSWORD_LENGTH
+                    + " chars with a letter and a digit");
+            valid = false;
+        }
+        if (!valid) {
+            view.setStatusError("Please correct the highlighted fields.");
+            return;
+        }
+
+        final String username = view.getNewUsername();
+        final String fullName = view.getNewFullName();
+        final String password = view.getNewPassword();
+        final String role     = view.getNewRole();
+
+        try {
+            view.setBusy(true);
+            int id = userDAO.create(username, password, fullName, role);
+
+            view.setStatusSuccess("Account '" + username + "' created as "
+                    + role + " (id " + id + ").");
+            view.showInfo("Account created.\n\n"
+                    + "Username : " + username + "\n"
+                    + "Role     : " + role + "\n\n"
+                    + "Give the password to " + fullName
+                    + " and ask them to change it after signing in.");
+            view.clearUserForm();
+            loadStaff();
+
+        } catch (Exception ex) {
+            // The DAO throws when the username is taken.
+            view.showUserFieldError("username", "Already taken");
+            view.setStatusError(ex.getMessage());
+        } finally {
+            view.setBusy(false);
+        }
+    }
+
+    private void resetPassword() {
+        if (!requireAdmin()) {
+            return;
+        }
+        int    id       = view.getSelectedUserId();
+        String username = view.getSelectedUsername();
+
+        if (id < 0) {
+            view.setStatusError("Select an account first.");
+            return;
+        }
+
+        String password = view.promptForPassword(username);
+        if (password == null) {
+            return;                       // cancelled
+        }
+        if (!Validator.isStrongPassword(password)) {
+            view.showError("The password must be at least "
+                    + Validator.MIN_PASSWORD_LENGTH
+                    + " characters and contain a letter and a digit.");
+            return;
+        }
+
+        try {
+            if (userDAO.resetPassword(id, password)) {
+                view.setStatusSuccess("Password reset for " + username
+                        + ". Their other sessions were closed.");
+                view.showInfo("Password reset for " + username + ".\n\n"
+                        + "Any sessions they had open elsewhere have been "
+                        + "signed out, because a reset normally means the old "
+                        + "password was compromised or forgotten.");
+                loadStaff();
+            }
+        } catch (Exception ex) {
+            view.showError("Could not reset the password.\n\n" + ex.getMessage());
+        }
+    }
+
+    private void changeRole() {
+        if (!requireAdmin()) {
+            return;
+        }
+        int    id       = view.getSelectedUserId();
+        String username = view.getSelectedUsername();
+        String current  = view.getSelectedUserRole();
+
+        if (id < 0) {
+            view.setStatusError("Select an account first.");
+            return;
+        }
+
+        String role = view.promptForRole(username, current);
+        if (role == null || role.equals(current)) {
+            return;
+        }
+
+        try {
+            // Never allow the last administrator to be demoted, or nobody
+            // could ever manage accounts again.
+            if ("ADMIN".equals(current) && "STAFF".equals(role)
+                    && userDAO.countAdmins() <= 1) {
+                view.showError("This is the only administrator account.\n\n"
+                        + "Promote another account to ADMIN first.");
+                return;
+            }
+
+            String fullName = String.valueOf(view.getStaffTableModel()
+                    .getValueAt(indexOfUser(id), 2));
+
+            if (userDAO.update(id, fullName, role)) {
+                view.setStatusSuccess(username + " is now " + role + ".");
+                loadStaff();
+
+                if (id == loggedInUser.getUserId()) {
+                    view.showInfo("You changed your own role.\n\n"
+                            + "Sign out and back in for it to take effect.");
+                }
+            }
+        } catch (Exception ex) {
+            view.showError("Could not change the role.\n\n" + ex.getMessage());
+        }
+    }
+
+    private void deleteUser() {
+        if (!requireAdmin()) {
+            return;
+        }
+        int    id       = view.getSelectedUserId();
+        String username = view.getSelectedUsername();
+        String role     = view.getSelectedUserRole();
+
+        if (id < 0) {
+            view.setStatusError("Select an account first.");
+            return;
+        }
+
+        // An administrator deleting their own account mid-session would be
+        // signed out with no way back in.
+        if (id == loggedInUser.getUserId()) {
+            view.showError("You cannot delete the account you are signed in as.");
+            return;
+        }
+
+        try {
+            if ("ADMIN".equals(role) && userDAO.countAdmins() <= 1) {
+                view.showError("This is the only administrator account "
+                        + "and cannot be deleted.");
+                return;
+            }
+            if (!view.confirmDeleteUser(username)) {
+                return;
+            }
+            if (userDAO.delete(id)) {
+                view.setStatusSuccess("Account '" + username + "' deleted.");
+                loadStaff();
+            }
+        } catch (Exception ex) {
+            view.showError("Could not delete the account.\n\n" + ex.getMessage());
+        }
+    }
+
+    /** Finds the table row holding a given user id. */
+    private int indexOfUser(int userId) {
+        DefaultTableModel model = view.getStaffTableModel();
+        for (int i = 0; i < model.getRowCount(); i++) {
+            if (String.valueOf(userId).equals(String.valueOf(model.getValueAt(i, 0)))) {
+                return i;
+            }
+        }
+        return 0;
     }
 
     // =================================================================

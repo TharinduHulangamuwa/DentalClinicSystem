@@ -71,6 +71,7 @@ public class MainView extends JFrame {
     public static final String SCREEN_SUMMARY   = "summary";
     public static final String SCREEN_REMINDERS = "reminders";
     public static final String SCREEN_SESSIONS  = "sessions";
+    public static final String SCREEN_STAFF     = "staff";
     public static final String SCREEN_HELP      = "help";
 
     private final CardLayout cards   = new CardLayout();
@@ -167,6 +168,37 @@ public class MainView extends JFrame {
     private final JButton btnEndAllSessions  = Theme.danger("Sign Out Everywhere", 'X',
             "Close this account's sessions on every machine");
 
+    // ---------------- staff accounts (administrator only) ----------------
+    private final DefaultTableModel staffModel = new DefaultTableModel(
+            new String[]{"ID", "Username", "Full Name", "Role",
+                         "Created", "Live Sessions"}, 0) {
+        @Override public boolean isCellEditable(int r, int c) { return false; }
+    };
+    private final StripedTable tblStaff = new StripedTable(staffModel);
+
+    private final JTextField     txtNewUsername = new JTextField();
+    private final JTextField     txtNewFullName = new JTextField();
+    private final javax.swing.JPasswordField txtNewPassword =
+            new javax.swing.JPasswordField();
+    private final JComboBox<String> cmbNewRole =
+            new JComboBox<>(new String[]{"STAFF", "ADMIN"});
+
+    private final JButton btnCreateUser   = Theme.primary("Create Account", 'N',
+            "Create this staff account (Alt+N)");
+    private final JButton btnClearUser    = Theme.secondary("Clear", 'K',
+            "Empty the account form");
+    private final JButton btnResetPassword = Theme.secondary("Reset Password", 'W',
+            "Set a new password for the selected account");
+    private final JButton btnChangeRole    = Theme.secondary("Change Role", 'O',
+            "Promote or demote the selected account");
+    private final JButton btnDeleteUser    = Theme.danger("Delete Account", 'Y',
+            "Permanently remove the selected account");
+    private final JButton btnStaffRefresh  = Theme.secondary("Refresh", 'J',
+            "Reload the staff list");
+
+    private final Map<String, JLabel>     userErrorLabels = new LinkedHashMap<>();
+    private final Map<String, JComponent> userFields      = new LinkedHashMap<>();
+
     // ---------------- header and status ----------------
     private final JLabel  lblScreenTitle = new JLabel("Dashboard");
     private final JLabel  lblUser        = new JLabel();
@@ -195,6 +227,7 @@ public class MainView extends JFrame {
         content.add(buildSummaryScreen(),   SCREEN_SUMMARY);
         content.add(buildRemindersScreen(), SCREEN_REMINDERS);
         content.add(buildSessionsScreen(),  SCREEN_SESSIONS);
+        content.add(buildStaffScreen(),     SCREEN_STAFF);
         content.add(buildHelpScreen(),      SCREEN_HELP);
 
         JPanel main = new JPanel(new BorderLayout());
@@ -241,6 +274,7 @@ public class MainView extends JFrame {
         addNav(bar, SCREEN_SUMMARY,   "Daily Summary");
         addNav(bar, SCREEN_REMINDERS, "Patient Reminders");
         addNav(bar, SCREEN_SESSIONS,  "Active Sessions");
+        addNav(bar, SCREEN_STAFF,     "Staff Accounts");
         addNav(bar, SCREEN_HELP,      "Help");
 
         bar.add(Box.createVerticalGlue());
@@ -583,6 +617,84 @@ public class MainView extends JFrame {
         screen.add(scroll,         BorderLayout.CENTER);
         screen.add(bottom,         BorderLayout.SOUTH);
         return screen;
+    }
+
+    // =================================================================
+    // SCREEN - staff accounts (administrator only)
+    //
+    // Hidden entirely from non-administrators by removeAdminScreens(),
+    // which the controller calls when a STAFF user signs in. Hiding the
+    // route is a convenience; the real protection is that the controller
+    // refuses the operations regardless of what is on screen.
+    // =================================================================
+    private JPanel buildStaffScreen() {
+
+        JPanel form = Theme.white(new GridLayout(4, 3, 12, 10));
+        form.setBorder(Theme.titledCard("Create a Staff Account"));
+
+        addUserRow(form, "username", "Username:",  txtNewUsername,
+                   "4-20 characters, starts with a letter");
+        addUserRow(form, "fullName", "Full Name:", txtNewFullName,
+                   "as it should appear in the system");
+        addUserRow(form, "password", "Password:",  txtNewPassword,
+                   "at least 8 characters, letters and digits");
+        addUserRow(form, "role",     "Role:",      cmbNewRole,
+                   "ADMIN can manage staff accounts");
+
+        JPanel createActions = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 12, 8));
+        createActions.add(btnCreateUser);
+        createActions.add(btnClearUser);
+
+        JPanel top = Theme.canvas(new BorderLayout());
+        top.add(form,          BorderLayout.NORTH);
+        top.add(createActions, BorderLayout.CENTER);
+
+        tblStaff.width(0, 50);
+        tblStaff.width(1, 120);
+        tblStaff.width(3, 90);
+        JScrollPane scroll = new JScrollPane(tblStaff);
+        scroll.setBorder(Theme.titledCard("Existing Accounts"));
+        scroll.getViewport().setBackground(Theme.CARD);
+
+        JPanel manageActions = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        manageActions.add(btnStaffRefresh);
+        manageActions.add(btnResetPassword);
+        manageActions.add(btnChangeRole);
+        manageActions.add(btnDeleteUser);
+
+        JPanel screen = Theme.canvas(new BorderLayout(0, 14));
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(top,           BorderLayout.NORTH);
+        screen.add(scroll,        BorderLayout.CENTER);
+        screen.add(manageActions, BorderLayout.SOUTH);
+        return screen;
+    }
+
+    private void addUserRow(JPanel form, String key, String label,
+                            JComponent field, String hint) {
+        field.setFont(Theme.BODY);
+        if (field instanceof JTextField) {
+            field.setBorder(Theme.FIELD);
+        }
+        JLabel message = Theme.hint(hint);
+        form.add(Theme.formLabel(label));
+        form.add(field);
+        form.add(message);
+        userFields.put(key, field);
+        userErrorLabels.put(key, message);
+    }
+
+    /**
+     * Removes the administrator-only destinations from the sidebar.
+     * Called by the controller when a STAFF user signs in.
+     */
+    public void removeAdminScreens() {
+        NavButton staffNav = navButtons.remove(SCREEN_STAFF);
+        if (staffNav != null) {
+            staffNav.getParent().remove(staffNav);
+            revalidate();
+            repaint();
+        }
     }
 
     // =================================================================
@@ -956,6 +1068,110 @@ public class MainView extends JFrame {
     }
 
     // =================================================================
+    // STAFF ACCOUNT SCREEN - accessors
+    // =================================================================
+    public String getNewUsername() { return txtNewUsername.getText().trim(); }
+    public String getNewFullName() { return txtNewFullName.getText().trim(); }
+    public String getNewPassword() { return new String(txtNewPassword.getPassword()); }
+    public String getNewRole()     { return (String) cmbNewRole.getSelectedItem(); }
+
+    public DefaultTableModel getStaffTableModel() { return staffModel; }
+
+    /** The user id of the selected staff row, or -1 if none. */
+    public int getSelectedUserId() {
+        int row = tblStaff.getSelectedRow();
+        if (row < 0) {
+            return -1;
+        }
+        int modelRow = tblStaff.convertRowIndexToModel(row);
+        return Integer.parseInt(String.valueOf(staffModel.getValueAt(modelRow, 0)));
+    }
+
+    public String getSelectedUsername() {
+        int row = tblStaff.getSelectedRow();
+        if (row < 0) {
+            return null;
+        }
+        int modelRow = tblStaff.convertRowIndexToModel(row);
+        return String.valueOf(staffModel.getValueAt(modelRow, 1));
+    }
+
+    public String getSelectedUserRole() {
+        int row = tblStaff.getSelectedRow();
+        if (row < 0) {
+            return null;
+        }
+        int modelRow = tblStaff.convertRowIndexToModel(row);
+        return String.valueOf(staffModel.getValueAt(modelRow, 3));
+    }
+
+    public void showUserFieldError(String key, String message) {
+        JLabel label = userErrorLabels.get(key);
+        if (label != null) {
+            label.setText(message);
+            label.setForeground(Theme.ERROR);
+        }
+        JComponent field = userFields.get(key);
+        if (field instanceof JTextField) {
+            field.setBackground(Theme.ERROR_BG);
+            field.setBorder(Theme.FIELD_ERROR);
+            field.requestFocus();
+        }
+    }
+
+    public void clearUserFieldErrors() {
+        for (Map.Entry<String, JLabel> e : userErrorLabels.entrySet()) {
+            JLabel label = e.getValue();
+            if (Theme.ERROR.equals(label.getForeground())) {
+                label.setText("");
+                label.setForeground(Theme.TEXT_MUTED);
+            }
+            JComponent field = userFields.get(e.getKey());
+            if (field instanceof JTextField) {
+                field.setBackground(Theme.FIELD_OK);
+                field.setBorder(Theme.FIELD);
+            }
+        }
+    }
+
+    public void clearUserForm() {
+        clearUserFieldErrors();
+        txtNewUsername.setText("");
+        txtNewFullName.setText("");
+        txtNewPassword.setText("");
+        cmbNewRole.setSelectedIndex(0);
+        txtNewUsername.requestFocus();
+    }
+
+    /** Asks for a new password, masked. Returns null if cancelled. */
+    public String promptForPassword(String username) {
+        javax.swing.JPasswordField field = new javax.swing.JPasswordField();
+        field.setFont(Theme.BODY);
+        int choice = JOptionPane.showConfirmDialog(this,
+                new Object[]{"New password for " + username + ":", field},
+                "Reset Password", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+        return choice == JOptionPane.OK_OPTION ? new String(field.getPassword()) : null;
+    }
+
+    public boolean confirmDeleteUser(String username) {
+        return JOptionPane.showConfirmDialog(this,
+                "Permanently delete the account '" + username + "'?\n\n"
+              + "Their open sessions will be closed. This cannot be undone.",
+                "Confirm Delete Account", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    /** Asks which role to give the selected account. Null if cancelled. */
+    public String promptForRole(String username, String currentRole) {
+        String[] options = {"STAFF", "ADMIN"};
+        Object choice = JOptionPane.showInputDialog(this,
+                "Role for " + username + ":", "Change Role",
+                JOptionPane.QUESTION_MESSAGE, null, options, currentRole);
+        return choice == null ? null : String.valueOf(choice);
+    }
+
+    // =================================================================
     // OBSERVER PATTERN - the controller subscribes to these events
     // =================================================================
     public void addSaveListener(ActionListener l)          { btnSave.addActionListener(l); }
@@ -971,6 +1187,13 @@ public class MainView extends JFrame {
     public void addLogoutListener(ActionListener l)         { btnLogout.addActionListener(l); }
     public void addSessionRefreshListener(ActionListener l) { btnSessionRefresh.addActionListener(l); }
     public void addEndAllSessionsListener(ActionListener l) { btnEndAllSessions.addActionListener(l); }
+
+    public void addCreateUserListener(ActionListener l)    { btnCreateUser.addActionListener(l); }
+    public void addClearUserListener(ActionListener l)     { btnClearUser.addActionListener(l); }
+    public void addResetPasswordListener(ActionListener l) { btnResetPassword.addActionListener(l); }
+    public void addChangeRoleListener(ActionListener l)    { btnChangeRole.addActionListener(l); }
+    public void addDeleteUserListener(ActionListener l)    { btnDeleteUser.addActionListener(l); }
+    public void addStaffRefreshListener(ActionListener l)  { btnStaffRefresh.addActionListener(l); }
 
     public void addSearchListener(ActionListener l) {
         this.searchListener = l;

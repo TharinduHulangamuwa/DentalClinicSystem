@@ -58,6 +58,8 @@ defensible when a marker reads the code.
 - Management summary per dentist per day
 - Patient reminder generation
 - Active session monitor with "sign out everywhere"
+- **Staff account management (administrator only)** — create STAFF and ADMIN
+  accounts, reset passwords, change roles, delete accounts
 - In-application help
 - Three background threads: clock, session monitor, and SwingWorker loads
 
@@ -71,7 +73,23 @@ defensible when a marker reads the code.
 5. Right-click **Libraries → Add Library → JUnit**
 6. Run `Main.java`
 
-**Sign in:** `admin` / `admin123`  or  `nimali` / `nimali123`
+**Sign in:** `admin` / `admin123` (ADMIN)  or  `nimali` / `nimali123` (STAFF)
+
+## Roles
+
+| | STAFF | ADMIN |
+|---|---|---|
+| Appointments, billing, reports, reminders | yes | yes |
+| Active Sessions | yes | yes |
+| **Staff Accounts** | **no** | yes |
+
+Enforced twice: the sidebar entry is removed for STAFF users, and
+`requireAdmin()` refuses each account operation regardless of what is on
+screen. Hiding a button is a convenience, not a security control.
+
+Safeguards: the last administrator cannot be demoted or deleted; you cannot
+delete the account you are signed in as; resetting a password closes that
+user's other sessions.
 
 ## Session management
 

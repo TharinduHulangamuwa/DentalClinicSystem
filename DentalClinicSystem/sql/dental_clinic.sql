@@ -135,6 +135,24 @@ BEGIN
             CONCAT(OLD.patient_name, ' on ', OLD.appointment_date));
 END$$
 
+CREATE TRIGGER trg_user_created
+AFTER INSERT ON users
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_log (action, record_ref, details)
+    VALUES ('USER_CREATED', NEW.username,
+            CONCAT(NEW.full_name, ' created with role ', NEW.role));
+END$$
+
+CREATE TRIGGER trg_user_deleted
+AFTER DELETE ON users
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_log (action, record_ref, details)
+    VALUES ('USER_DELETED', OLD.username,
+            CONCAT(OLD.full_name, ' (', OLD.role, ') removed'));
+END$$
+
 DELIMITER ;
 
 -- =====================================================================

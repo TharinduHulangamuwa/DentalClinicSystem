@@ -110,4 +110,47 @@ public class ValidatorTest {
         assertFalse("Wrong separator",         Validator.isValidDate("2026/06/15"));
         assertFalse(Validator.isValidDate(null));
     }
+
+    // -----------------------------------------------------------------
+    // TC-23  Username rule for new staff accounts
+    // -----------------------------------------------------------------
+    @Test
+    public void testUsernameValidation() {
+
+        assertTrue(Validator.isValidUsername("nimali"));
+        assertTrue(Validator.isValidUsername("dr.perera"));
+        assertTrue(Validator.isValidUsername("staff_01"));
+
+        assertFalse("Must be at least four characters",
+                    Validator.isValidUsername("abc"));
+        assertFalse("Must start with a letter",
+                    Validator.isValidUsername("1nimali"));
+        assertFalse("Spaces are not allowed",
+                    Validator.isValidUsername("nimali perera"));
+        assertFalse("Symbols are not allowed",
+                    Validator.isValidUsername("nimali@clinic"));
+        assertFalse("Twenty-one characters is too long",
+                    Validator.isValidUsername("abcdefghijklmnopqrstu"));
+        assertFalse(Validator.isValidUsername(""));
+        assertFalse(Validator.isValidUsername(null));
+    }
+
+    // -----------------------------------------------------------------
+    // TC-24  Password rule for new staff accounts
+    // -----------------------------------------------------------------
+    @Test
+    public void testPasswordStrength() {
+
+        assertTrue(Validator.isStrongPassword("admin123"));
+        assertTrue(Validator.isStrongPassword("Clinic2026"));
+
+        assertFalse("Seven characters is too short",
+                    Validator.isStrongPassword("abc1234"));
+        assertFalse("Letters only must be rejected",
+                    Validator.isStrongPassword("password"));
+        assertFalse("Digits only must be rejected",
+                    Validator.isStrongPassword("12345678"));
+        assertFalse(Validator.isStrongPassword(""));
+        assertFalse(Validator.isStrongPassword(null));
+    }
 }
