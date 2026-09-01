@@ -1,6 +1,8 @@
 package com.dentalclinic.controller;
 
 import com.dentalclinic.model.Session;
+import com.dentalclinic.model.SessionDAO;
+import com.dentalclinic.model.SessionStore;
 import com.dentalclinic.model.User;
 import com.dentalclinic.model.UserDAO;
 import com.dentalclinic.model.Validator;
@@ -9,20 +11,28 @@ import com.dentalclinic.view.MainView;
 import javax.swing.SwingWorker;
 
 /**
- * LOGIC TIER - handles staff authentication.
+ * LOGIC TIER - authentication and session creation.
  *
- * The controller is the only class that knows both the view and the DAO.
- * The view knows nothing about the database; the DAO knows nothing about
+ * The controller is the only class that knows both the view and the DAOs.
+ * The view knows nothing about the database; the DAOs know nothing about
  * Swing. That separation is the core of the MVC pattern.
  *
+ * A successful sign-in does two things: it verifies the password, and it
+ * creates a session row identified by a random token. If the user asked to
+ * be remembered, the token is also written to a local file so the next
+ * launch can resume without a password.
+ *
  * THREADING: authentication queries MySQL, so it runs inside a SwingWorker.
- * If it ran directly in the button handler the login window would freeze
- * for as long as the database took to answer.
+ * Run directly in the button handler it would freeze the window for as long
+ * as the database took to answer.
+ *
+ * @author [Your Name]
  */
 public class LoginController {
 
-    private final LoginView view;
-    private final UserDAO   userDAO;
+    private final LoginView  view;
+    private final UserDAO    userDAO;
+    private final SessionDAO sessionDAO = new SessionDAO();
 
     public LoginController(LoginView view, UserDAO userDAO) {
         this.view    = view;
@@ -34,10 +44,12 @@ public class LoginController {
     }
 
     private void attemptLogin() {
-        final String username = view.getUsername();
-        final String password = view.getPassword();
+        final String  username = view.getUsername();
+        final String  password = view.getPassword();
+        final boolean remember = view.isRememberMe();
 
-        // ---- client-side validation happens before we bother the database ----
+        // Client-side checks first, so we do not trouble the database with
+        // an obviously incomplete attempt.
         if (!Validator.isNotEmpty(username)) {
             view.setMessage("Username is required.");
             return;
@@ -50,19 +62,17 @@ public class LoginController {
         view.setMessage(" ");
         view.setBusy(true);
 
-        // ---- THREADING: query the database off the Event Dispatch Thread ----
         new SwingWorker<User, Void>() {
 
             @Override
             protected User doInBackground() throws Exception {
-                // Runs on a worker thread. Safe to be slow here.
+                // WORKER THREAD - slow work is safe here
                 return userDAO.authenticate(username, password);
             }
 
             @Override
             protected void done() {
-                // SwingWorker guarantees this runs back on the EDT,
-                // so touching Swing components here is safe.
+                // EVENT DISPATCH THREAD - Swing calls are safe again
                 view.setBusy(false);
                 try {
                     User user = get();
@@ -71,20 +81,38 @@ public class LoginController {
                         view.clearPassword();
                         return;
                     }
-                    openMainWindow(user);
+                    openSession(user, remember);
+
                 } catch (Exception ex) {
-                    view.setMessage("Cannot reach database. Is WAMP running?");
-                    System.err.println("Login error: " + ex.getMessage());
+                    view.setMessage("Cannot reach the database. Is WampServer running?");
+                    System.err.println("Sign-in error: " + ex.getMessage());
                 }
             }
         }.execute();
     }
 
-    private void openMainWindow(User user) {
-        Session.start(user);                 // open the staff session
-        MainView mainView = new MainView();
-        new AppointmentController(mainView, user);   // controller wires itself in
-        mainView.setVisible(true);
-        view.dispose();                              // close the login window
+    /** Creates the session row, optionally persists it, and opens the app. */
+    private void openSession(User user, boolean remember) {
+        try {
+            String token = sessionDAO.create(user, remember);
+            Session.start(token, user, remember);
+
+            if (remember) {
+                SessionStore.save(token);
+            } else {
+                // A token left over from a previous "remember me" must not
+                // survive an ordinary sign-in, or the next launch would
+                // silently resume the wrong session.
+                SessionStore.clear();
+            }
+
+            MainView mainView = new MainView();
+            new AppointmentController(mainView, user);
+            mainView.setVisible(true);
+            view.dispose();
+
+        } catch (Exception ex) {
+            view.setMessage("Could not start a session: " + ex.getMessage());
+        }
     }
 }

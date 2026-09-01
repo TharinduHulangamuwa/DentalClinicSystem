@@ -4,49 +4,66 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 
 /**
- * SINGLETON PATTERN - represents the current staff session.
+ * SINGLETON PATTERN - the currently authenticated staff session.
  *
- * The marking criteria refer to "effective use of sessions/cookies". Cookies
- * belong to web browsers and have no meaning in a desktop client, but the
- * underlying concept - server-side state identifying who is logged in and for
- * how long - applies directly. This class is that state.
+ * WHY THIS CLASS EXISTS
+ * A Java Swing application does not run in a browser, so the HTTP session
+ * cookie a web application relies on (JSESSIONID and similar) is simply not
+ * available. The concept behind it still is: state identifying who is signed
+ * in, for how long, and whether that authentication is still valid.
  *
- * It records who logged in, when, and when they were last active, and it
- * enforces an inactivity timeout. In the web service tier the same idea would
- * be carried by a token issued at login and validated on each request; this
- * class is the desktop equivalent of that token.
+ * This class implements that concept explicitly. Each sign-in generates a
+ * cryptographically random token; the token is hashed and stored in the
+ * sessions table, and the raw value is held here in memory. Every user action
+ * refreshes the last-activity timestamp, and an idle session expires.
+ *
+ * The parallel with a web session is exact:
+ *     browser cookie        ->  the token held here and in the local file
+ *     server session store  ->  the sessions table in MySQL
+ *     session timeout       ->  expires_at plus the idle check below
+ *     session.invalidate()  ->  SessionDAO.end()
  *
  * @author [Your Name]
  */
 public class Session {
 
-    /** Staff are logged out automatically after this many minutes idle. */
-    private static final long TIMEOUT_MINUTES = 30;
+    /** Idle minutes after which a session closes automatically. */
+    public static final int TIMEOUT_MINUTES = 30;
+
+    /** Days a "keep me signed in" token survives without use. */
+    public static final int REMEMBER_DAYS = 7;
+
+    /** Minutes remaining at which the user is warned. */
+    public static final int WARN_MINUTES = 5;
 
     private static Session instance;
 
-    private final User   user;
-    private final Date   loginTime;
-    private Date         lastActivity;
+    private final String  token;
+    private final User    user;
+    private final Date    loginTime;
+    private final boolean remembered;
+    private Date lastActivity;
 
-    private Session(User user) {
+    private Session(String token, User user, boolean remembered) {
+        this.token        = token;
         this.user         = user;
+        this.remembered   = remembered;
         this.loginTime    = new Date();
         this.lastActivity = new Date();
     }
 
-    /** Opens a new session, replacing any previous one. */
-    public static synchronized void start(User user) {
-        instance = new Session(user);
-        System.out.println("Session started for " + user.getUsername()
-                + " at " + new SimpleDateFormat("HH:mm:ss").format(new Date()));
+    // ---------------- lifecycle ----------------
+
+    public static synchronized void start(String token, User user, boolean remembered) {
+        instance = new Session(token, user, remembered);
+        System.out.println("[SESSION] opened for " + user.getUsername()
+                + "  token=" + mask(token) + "  remembered=" + remembered);
     }
 
-    /** Ends the current session (logout or exit). */
     public static synchronized void end() {
         if (instance != null) {
-            System.out.println("Session ended for " + instance.user.getUsername()
-                    + " after " + instance.getDurationMinutes() + " minutes");
+            System.out.println("[SESSION] closed for " + instance.user.getUsername()
+                    + " after " + instance.getDurationMinutes() + " minute(s)");
         }
         instance = null;
     }
@@ -59,19 +76,36 @@ public class Session {
         return instance != null && !instance.hasTimedOut();
     }
 
-    /** Called whenever the user does something, to reset the idle timer. */
+    // ---------------- activity ----------------
+
+    /** Called on every user action, pushing the idle deadline back. */
     public synchronized void touch() {
         this.lastActivity = new Date();
     }
 
     public synchronized boolean hasTimedOut() {
-        long idleMillis = new Date().getTime() - lastActivity.getTime();
-        return idleMillis > TIMEOUT_MINUTES * 60 * 1000;
+        return getIdleMinutes() >= TIMEOUT_MINUTES;
     }
 
-    public User getUser() {
-        return user;
+    public synchronized long getIdleMinutes() {
+        return (new Date().getTime() - lastActivity.getTime()) / 60000;
     }
+
+    /** Minutes left before automatic sign-out, shown in the header. */
+    public synchronized long getMinutesRemaining() {
+        long left = TIMEOUT_MINUTES - getIdleMinutes();
+        return left < 0 ? 0 : left;
+    }
+
+    public synchronized boolean isExpiringSoon() {
+        return getMinutesRemaining() <= WARN_MINUTES;
+    }
+
+    // ---------------- accessors ----------------
+
+    public String  getToken()     { return token; }
+    public User    getUser()      { return user; }
+    public boolean isRemembered() { return remembered; }
 
     public long getDurationMinutes() {
         return (new Date().getTime() - loginTime.getTime()) / 60000;
@@ -79,5 +113,10 @@ public class Session {
 
     public String getLoginTimeText() {
         return new SimpleDateFormat("HH:mm").format(loginTime);
+    }
+
+    /** Shows only enough of a token to identify it; never log the whole thing. */
+    public static String mask(String t) {
+        return (t == null || t.length() < 10) ? "????" : t.substring(0, 10) + "...";
     }
 }

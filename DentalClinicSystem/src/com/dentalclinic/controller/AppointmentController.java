@@ -6,73 +6,94 @@ import com.dentalclinic.model.Bill;
 import com.dentalclinic.model.DBConnection;
 import com.dentalclinic.model.ReminderService;
 import com.dentalclinic.model.Session;
+import com.dentalclinic.model.SessionDAO;
+import com.dentalclinic.model.SessionStore;
 import com.dentalclinic.model.User;
+import com.dentalclinic.model.UserDAO;
 import com.dentalclinic.model.Validator;
 import com.dentalclinic.view.LoginView;
 import com.dentalclinic.view.MainView;
-import com.dentalclinic.model.UserDAO;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.File;
+import java.io.PrintWriter;
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.table.DefaultTableModel;
 
 /**
- * LOGIC TIER - all appointment, billing and reporting behaviour.
+ * LOGIC TIER - all appointment, billing, reporting and session behaviour.
  *
- * MULTITHREADING IS DEMONSTRATED TWICE IN THIS CLASS:
+ * MULTITHREADING IS DEMONSTRATED THREE TIMES IN THIS CLASS:
  *
  *   THREAD 1  startClockThread()
- *             A user-created daemon Thread that updates the status bar clock
- *             once per second for the whole life of the application. It never
- *             touches Swing directly - every update is handed to the Event
- *             Dispatch Thread through SwingUtilities.invokeLater().
+ *             A daemon Thread updating the status bar clock every second for
+ *             the life of the application.
  *
- *   THREAD 2  loadAppointmentsInBackground()
- *             A SwingWorker that queries MySQL for all appointment rows on a
- *             worker thread, then populates the JTable back on the EDT inside
- *             done(). The window stays responsive while the query runs.
+ *   THREAD 2  SwingWorker, used by every database operation
+ *             Queries run on a worker thread; results are applied on the
+ *             Event Dispatch Thread inside done(), so the window never
+ *             freezes while MySQL answers.
+ *
+ *   THREAD 3  startSessionMonitor()
+ *             A daemon Thread checking every second whether the session has
+ *             gone idle past its limit, refreshing the header countdown and
+ *             signing the user out automatically.
+ *
+ * Neither daemon thread ever touches a Swing component directly. Every
+ * update is handed to the Event Dispatch Thread through invokeLater, because
+ * Swing components may only be modified on that thread.
+ *
+ * @author [Your Name]
  */
 public class AppointmentController {
 
     private final MainView       view;
-    private final AppointmentDAO dao = new AppointmentDAO();
-    private final User           loggedInUser;
+    private final AppointmentDAO dao        = new AppointmentDAO();
+    private final SessionDAO     sessionDAO = new SessionDAO();
+    private final ReminderService reminders = new ReminderService(new AppointmentDAO());
+    private final User loggedInUser;
 
-    /** Holds the last successful search so the bill button knows what to bill. */
+    /** The last successful search, so the bill button knows what to bill. */
     private Appointment currentAppointment;
 
-    /** Reference kept so the clock can be stopped cleanly on exit. */
     private Thread clockThread;
+    private Thread sessionThread;
 
-    /** Generates patient reminder notifications. */
-    private final ReminderService reminderService = new ReminderService(new AppointmentDAO());
+    /** Throttles how often user activity is written to the database. */
+    private long lastActivityWrite = 0;
 
     public AppointmentController(MainView view, User loggedInUser) {
         this.view         = view;
         this.loggedInUser = loggedInUser;
 
-        view.setLoggedInUser(loggedInUser.getFullName());
+        view.setLoggedInUser(loggedInUser.getFullName()
+                + "  (" + loggedInUser.getRole() + ")");
 
         // ---- Observer pattern: subscribe to every view event ----
-        view.addSaveListener(e    -> saveAppointment());
-        view.addClearListener(e   -> {
-            if (view.confirmClear()) {
-                view.clearForm();
-                suggestNextAppointmentNo();
-            }
-        });
-        view.addSearchListener(e  -> searchAppointment());
-        view.addBillListener(e    -> generateBill());
-        view.addRefreshListener(e -> loadAppointmentsInBackground());
+        view.addSaveListener(e          -> saveAppointment());
+        view.addUpdateListener(e        -> updateAppointment());
+        view.addClearListener(e         -> clearForm());
+        view.addSearchListener(e        -> searchAppointment());
+        view.addBillListener(e          -> generateBill());
+        view.addSaveReceiptListener(e   -> saveReceiptToFile());
+        view.addRefreshListener(e       -> loadAppointments());
+        view.addEditListener(e          -> editSelected());
+        view.addDeleteListener(e        -> deleteSelected());
+        view.addFilterListener(e        -> filterAppointments());
         view.addReportRefreshListener(e -> loadDailyReport());
-        view.addRemindersListener(e -> generateReminders());
-        view.addLogoutListener(e -> logout());
+        view.addRemindersListener(e     -> generateReminders());
+        view.addLogoutListener(e        -> logout());
+        view.addSessionRefreshListener(e -> loadActiveSessions());
+        view.addEndAllSessionsListener(e -> signOutEverywhere());
+        view.addGlobalActivityListener(e -> recordActivity());
+
         view.addWindowCloseListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -80,44 +101,40 @@ public class AppointmentController {
             }
         });
 
-        // ---- startup sequence ----
+        // ---- startup ----
         loadTreatments();
-        startClockThread();               // THREAD 1
-        loadAppointmentsInBackground();   // THREAD 2
+        startClockThread();
+        startSessionMonitor();
+        refreshEverything();
+        describeSession();
+    }
+
+    /** Reloads every screen that reads from the database. */
+    private void refreshEverything() {
+        loadDashboard();
+        loadAppointments();
         loadDailyReport();
-        suggestNextAppointmentNo();
-        view.focusRegisterTab();
+        suggestNextNumber();
     }
 
     // =================================================================
-    // THREAD 1 - LIVE CLOCK ON A BACKGROUND DAEMON THREAD
+    // THREAD 1 - LIVE CLOCK
     //
-    // Why a separate thread: the clock must tick once per second forever.
-    // Doing that on the Event Dispatch Thread with a sleep loop would
-    // freeze the entire user interface.
-    //
-    // Why setDaemon(true): a daemon thread does not prevent the JVM from
-    // shutting down, so the application can exit without hanging.
-    //
-    // Why invokeLater: Swing components must only be modified on the EDT.
-    // This background thread NEVER calls view.setClock() directly - it
-    // schedules the call onto the EDT instead. This is the correct,
-    // thread-safe pattern.
+    // Why a separate thread: the clock must tick once a second forever.
+    // A sleep loop on the Event Dispatch Thread would freeze the entire
+    // interface. setDaemon(true) means the thread cannot stop the JVM
+    // from exiting.
     // =================================================================
     private void startClockThread() {
         clockThread = new Thread(() -> {
-            SimpleDateFormat formatter = new SimpleDateFormat("EEE dd MMM yyyy   HH:mm:ss");
+            SimpleDateFormat fmt = new SimpleDateFormat("EEE dd MMM yyyy   HH:mm:ss");
 
             while (!Thread.currentThread().isInterrupted()) {
-                final String timestamp = formatter.format(new Date());
-
-                // Hand the UI update to the Event Dispatch Thread
-                SwingUtilities.invokeLater(() -> view.setClock(timestamp));
-
+                final String now = fmt.format(new Date());
+                SwingUtilities.invokeLater(() -> view.setClock(now));
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
-                    // Restore the interrupt flag and leave the loop cleanly
                     Thread.currentThread().interrupt();
                 }
             }
@@ -128,18 +145,134 @@ public class AppointmentController {
     }
 
     // =================================================================
-    // THREAD 2 - ASYNCHRONOUS DATABASE LOAD WITH SwingWorker
+    // THREAD 3 - SESSION MONITOR
     //
-    // findAll() may return hundreds of rows once the clinic has been
-    // running for a year. Executing that query on the Event Dispatch
-    // Thread would freeze the window and Windows would report the
-    // application as "Not Responding".
+    // The check must keep running while the user does nothing at all, so
+    // it cannot be driven by user events.
     //
-    // SwingWorker splits the work in two:
-    //   doInBackground()  runs on a worker thread  -> slow work allowed
-    //   done()            runs on the EDT          -> Swing updates allowed
+    // Why this matters clinically: a reception desk left unattended with a
+    // live session means patient records are readable by anyone walking
+    // past. This is a data protection control, not a convenience.
     // =================================================================
-    private void loadAppointmentsInBackground() {
+    private void startSessionMonitor() {
+        sessionThread = new Thread(() -> {
+            boolean warned = false;
+
+            while (!Thread.currentThread().isInterrupted()) {
+                Session session = Session.getInstance();
+                if (session == null) {
+                    break;
+                }
+
+                if (session.hasTimedOut()) {
+                    SwingUtilities.invokeLater(() -> {
+                        view.showWarning("Your session expired after "
+                                + Session.TIMEOUT_MINUTES
+                                + " minutes of inactivity.\n\nPlease sign in again.");
+                        endSessionAndReturnToLogin("Session expired.");
+                    });
+                    break;
+                }
+
+                final long left = session.getMinutesRemaining();
+                final boolean soon = session.isExpiringSoon();
+
+                if (soon && !warned) {
+                    warned = true;
+                    SwingUtilities.invokeLater(() -> view.setStatusError(
+                            "Session expires in " + left
+                          + " minute(s). Move the mouse to stay signed in."));
+                } else if (!soon) {
+                    warned = false;
+                }
+
+                SwingUtilities.invokeLater(() -> view.setSessionCountdown(
+                        "Session expires in " + left + " min", soon));
+
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, "session-monitor");
+
+        sessionThread.setDaemon(true);
+        sessionThread.start();
+    }
+
+    /**
+     * Records user activity.
+     *
+     * The in-memory timestamp updates on every event, but the database is
+     * written at most once a minute. Writing on every mouse move would issue
+     * hundreds of pointless UPDATE statements.
+     */
+    private void recordActivity() {
+        final Session session = Session.getInstance();
+        if (session == null) {
+            return;
+        }
+        session.touch();
+
+        long now = System.currentTimeMillis();
+        if (now - lastActivityWrite < 60000) {
+            return;
+        }
+        lastActivityWrite = now;
+
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                sessionDAO.touch(session.getToken());
+                return null;
+            }
+        }.execute();
+    }
+
+    // =================================================================
+    // DASHBOARD
+    // =================================================================
+    private void loadDashboard() {
+        new SwingWorker<Object[], Void>() {
+
+            @Override
+            protected Object[] doInBackground() throws Exception {
+                Map<String, String> stats = dao.dashboardFigures();
+                List<Appointment> today =
+                        dao.findByDate(java.time.LocalDate.now().toString());
+                return new Object[]{stats, today};
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            protected void done() {
+                try {
+                    Object[] result = get();
+                    Map<String, String> stats = (Map<String, String>) result[0];
+                    List<Appointment> today   = (List<Appointment>) result[1];
+
+                    view.setDashboardStats(stats.get("today"), stats.get("tomorrow"),
+                                           stats.get("total"), stats.get("revenue"));
+
+                    DefaultTableModel model = view.getTodayTableModel();
+                    model.setRowCount(0);
+                    for (Appointment a : today) {
+                        model.addRow(new Object[]{
+                            a.getAppointmentTime(), a.getAppointmentNo(),
+                            a.getPatientName(), a.getDentistName(), a.getTreatmentType()});
+                    }
+                } catch (Exception ex) {
+                    view.setStatusError("Could not load the dashboard.");
+                }
+            }
+        }.execute();
+    }
+
+    // =================================================================
+    // THREAD 2 - ASYNCHRONOUS LOAD OF THE APPOINTMENT LIST
+    // =================================================================
+    private void loadAppointments() {
         view.setStatus("Loading appointments...");
         view.setBusy(true);
 
@@ -147,36 +280,19 @@ public class AppointmentController {
 
             @Override
             protected List<Appointment> doInBackground() throws Exception {
-                // WORKER THREAD - no Swing calls permitted in here
-                return dao.findAll();
+                return dao.findAll();        // WORKER THREAD, no Swing calls
             }
 
             @Override
-            protected void done() {
-                // EVENT DISPATCH THREAD - Swing calls are safe again
+            protected void done() {          // EVENT DISPATCH THREAD
                 try {
-                    List<Appointment> appointments = get();
-
-                    DefaultTableModel model = view.getTableModel();
-                    model.setRowCount(0);
-                    for (Appointment a : appointments) {
-                        model.addRow(new Object[]{
-                            a.getAppointmentNo(),
-                            a.getPatientName(),
-                            a.getContactNo(),
-                            a.getDentistName(),
-                            a.getTreatmentType(),
-                            a.getAppointmentDate(),
-                            a.getAppointmentTime()
-                        });
-                    }
-                    view.setStatus(appointments.size() + " appointment(s) loaded.");
-
+                    fillTable(get());
+                    view.setStatus(view.getTableModel().getRowCount()
+                            + " appointment(s) loaded.");
                 } catch (Exception ex) {
                     view.setStatusError("Could not load appointments.");
                     view.showError("Could not load appointments.\n\n"
-                                 + ex.getMessage()
-                                 + "\n\nCheck that WAMP is running.");
+                            + ex.getMessage() + "\n\nCheck that WampServer is running.");
                 } finally {
                     view.setBusy(false);
                 }
@@ -184,29 +300,208 @@ public class AppointmentController {
         }.execute();
     }
 
-    // =================================================================
-    // Load the treatment price list into the dropdown
-    // =================================================================
+    /** Filters the list as the user types. */
+    private void filterAppointments() {
+        final String term = view.getFilterText();
+
+        new SwingWorker<List<Appointment>, Void>() {
+            @Override
+            protected List<Appointment> doInBackground() throws Exception {
+                return term.isEmpty() ? dao.findAll() : dao.search(term);
+            }
+            @Override
+            protected void done() {
+                try {
+                    fillTable(get());
+                    view.setStatus(view.getTableModel().getRowCount() + " match(es).");
+                } catch (Exception ex) {
+                    view.setStatusError("Filter failed.");
+                }
+            }
+        }.execute();
+    }
+
+    private void fillTable(List<Appointment> appointments) {
+        DefaultTableModel model = view.getTableModel();
+        model.setRowCount(0);
+        for (Appointment a : appointments) {
+            model.addRow(new Object[]{
+                a.getAppointmentNo(), a.getPatientName(), a.getContactNo(),
+                a.getDentistName(), a.getTreatmentType(),
+                a.getAppointmentDate(), a.getAppointmentTime()});
+        }
+    }
+
     private void loadTreatments() {
         try {
-            Map<String, Double> treatments = dao.findTreatments();
-            view.setTreatmentOptions(treatments.keySet());
+            view.setTreatmentOptions(dao.findTreatments().keySet());
         } catch (Exception ex) {
             view.showError("Could not load the treatment list.\n\n" + ex.getMessage());
         }
     }
 
+    private void suggestNextNumber() {
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return dao.nextAppointmentNo();
+            }
+            @Override
+            protected void done() {
+                try {
+                    if (!view.isEditing()) {
+                        view.suggestAppointmentNo(get());
+                    }
+                } catch (Exception ignored) {
+                    // A suggestion is a convenience; failing to make one is harmless.
+                }
+            }
+        }.execute();
+    }
+
     // =================================================================
-    // FUNCTIONALITY 2 - REGISTER NEW APPOINTMENT
+    // FUNCTIONALITY 2 - REGISTER A NEW APPOINTMENT
     // =================================================================
     private void saveAppointment() {
+        if (!validateForm()) {
+            return;
+        }
+        Appointment appointment = readForm();
 
-        // Version 1.2: every validation failure is reported beside the field
-        // that caused it instead of in a modal dialog. All fields are checked
-        // in one pass so the user sees every problem at once rather than
-        // fixing one, resubmitting, and discovering the next.
+        try {
+            view.setBusy(true);
+
+            if (dao.findByNo(appointment.getAppointmentNo()) != null) {
+                view.showFieldError("appointmentNo", "Already in use");
+                view.setStatusError("That appointment number already exists.");
+                return;
+            }
+
+            if (dao.slotTaken(appointment.getDentistName(),
+                              appointment.getAppointmentDate(),
+                              appointment.getAppointmentTime())) {
+                reportDoubleBooking(appointment);
+                return;
+            }
+
+            if (dao.save(appointment)) {
+                view.setStatusSuccess("Appointment " + appointment.getAppointmentNo()
+                        + " saved for " + appointment.getPatientName() + ".");
+                view.clearForm();
+                refreshEverything();
+            }
+
+        } catch (SQLIntegrityConstraintViolationException ex) {
+            // Safety net: the database constraint caught a clash created
+            // between our check and our insert.
+            view.showFieldError("time", "Slot taken");
+            view.setStatusError("Double booking prevented by the database.");
+            view.showError("DOUBLE BOOKING PREVENTED BY THE DATABASE\n\n"
+                    + "That slot was taken while you were filling the form.");
+        } catch (Exception ex) {
+            view.setStatusError("Save failed.");
+            view.showError("Could not save the appointment.\n\n" + ex.getMessage());
+        } finally {
+            view.setBusy(false);
+        }
+    }
+
+    // =================================================================
+    // EDIT AN EXISTING APPOINTMENT
+    // =================================================================
+    private void editSelected() {
+        String no = view.getSelectedAppointmentNo();
+        if (no == null) {
+            view.setStatusError("Select a row first.");
+            return;
+        }
+        try {
+            Appointment a = dao.findByNo(no);
+            if (a == null) {
+                view.setStatusError("That appointment no longer exists.");
+                loadAppointments();
+                return;
+            }
+            view.loadForEdit(a.getAppointmentNo(), a.getPatientName(), a.getAddress(),
+                             a.getContactNo(), a.getDentistName(), a.getTreatmentType(),
+                             a.getAppointmentDate(), a.getAppointmentTime());
+            view.setStatus("Editing " + no + ".");
+
+        } catch (Exception ex) {
+            view.showError("Could not open that appointment.\n\n" + ex.getMessage());
+        }
+    }
+
+    private void updateAppointment() {
+        if (!validateForm()) {
+            return;
+        }
+        Appointment appointment = readForm();
+
+        try {
+            view.setBusy(true);
+
+            // The slot check must ignore this appointment's own row, or
+            // saving without changing the time would look like a clash.
+            if (dao.slotTakenByOther(appointment.getDentistName(),
+                                     appointment.getAppointmentDate(),
+                                     appointment.getAppointmentTime(),
+                                     appointment.getAppointmentNo())) {
+                reportDoubleBooking(appointment);
+                return;
+            }
+
+            if (dao.update(appointment)) {
+                view.setStatusSuccess("Appointment " + appointment.getAppointmentNo()
+                        + " updated.");
+                view.clearForm();
+                refreshEverything();
+            }
+
+        } catch (Exception ex) {
+            view.setStatusError("Update failed.");
+            view.showError("Could not update the appointment.\n\n" + ex.getMessage());
+        } finally {
+            view.setBusy(false);
+        }
+    }
+
+    private void deleteSelected() {
+        String no = view.getSelectedAppointmentNo();
+        if (no == null) {
+            view.setStatusError("Select a row first.");
+            return;
+        }
+        if (!view.confirmDelete(no)) {
+            return;
+        }
+        try {
+            if (dao.delete(no)) {
+                view.setStatusSuccess("Appointment " + no + " deleted.");
+                refreshEverything();
+            } else {
+                view.setStatusError("Nothing was deleted.");
+            }
+        } catch (Exception ex) {
+            view.showError("Could not delete the appointment.\n\n" + ex.getMessage());
+        }
+    }
+
+    private void clearForm() {
+        if (view.confirmClear()) {
+            view.clearForm();
+            suggestNextNumber();
+        }
+    }
+
+    /**
+     * Validates every field in one pass, reporting each problem beside the
+     * field that caused it. Checking all fields rather than stopping at the
+     * first means the user sees every problem at once instead of fixing one,
+     * resubmitting, and discovering the next.
+     */
+    private boolean validateForm() {
         view.clearAllFieldErrors();
-
         boolean valid = true;
 
         if (!Validator.isValidAppointmentNo(view.getAppointmentNo())) {
@@ -238,86 +533,23 @@ public class AppointmentController {
 
         if (!valid) {
             view.setStatusError("Please correct the highlighted fields.");
-            return;
         }
-
-        Appointment appointment = new Appointment(
-                view.getAppointmentNo(),
-                view.getPatientName(),
-                view.getAddress(),
-                view.getContactNo(),
-                view.getDentistName(),
-                view.getTreatmentType(),
-                view.getDate(),
-                view.getTime());
-
-        try {
-            view.setBusy(true);
-
-            // duplicate appointment number
-            if (dao.findByNo(appointment.getAppointmentNo()) != null) {
-                view.showFieldError("appointmentNo", "Already in use");
-                view.setStatusError("That appointment number already exists.");
-                return;
-            }
-
-            // double booking, the problem stated in the scenario
-            if (dao.slotTaken(appointment.getDentistName(),
-                              appointment.getAppointmentDate(),
-                              appointment.getAppointmentTime())) {
-                view.showFieldError("time", "Dentist already booked");
-                view.setStatusError("Double booking prevented.");
-                view.showError("DOUBLE BOOKING PREVENTED\n\n"
-                             + appointment.getDentistName()
-                             + " already has an appointment on "
-                             + appointment.getAppointmentDate() + " at "
-                             + appointment.getAppointmentTime()
-                             + ".\n\nPlease choose a different time or dentist.");
-                return;
-            }
-
-            if (dao.save(appointment)) {
-                view.setStatusSuccess("Appointment " + appointment.getAppointmentNo()
-                        + " saved for " + appointment.getPatientName() + ".");
-                view.clearForm();
-                suggestNextAppointmentNo();
-                loadAppointmentsInBackground();
-                loadDailyReport();
-            }
-
-        } catch (SQLIntegrityConstraintViolationException ex) {
-            view.showFieldError("time", "Slot taken");
-            view.setStatusError("Double booking prevented by the database.");
-            view.showError("DOUBLE BOOKING PREVENTED BY THE DATABASE\n\n"
-                         + "That slot was taken while you were filling the form.");
-        } catch (Exception ex) {
-            view.setStatusError("Save failed.");
-            view.showError("Could not save the appointment.\n\n" + ex.getMessage());
-        } finally {
-            view.setBusy(false);
-        }
+        return valid;
     }
 
-    /**
-     * Looks up the next free appointment number and offers it to the user.
-     * Inventing a unique number by hand is error prone and slow; the system
-     * already knows what the next one should be.
-     */
-    private void suggestNextAppointmentNo() {
-        new SwingWorker<String, Void>() {
-            @Override
-            protected String doInBackground() throws Exception {
-                return new AppointmentDAO().nextAppointmentNo();
-            }
-            @Override
-            protected void done() {
-                try {
-                    view.suggestAppointmentNo(get());
-                } catch (Exception ignored) {
-                    // a suggestion is a convenience; failing to make one is harmless
-                }
-            }
-        }.execute();
+    private Appointment readForm() {
+        return new Appointment(view.getAppointmentNo(), view.getPatientName(),
+                view.getAddress(), view.getContactNo(), view.getDentistName(),
+                view.getTreatmentType(), view.getDate(), view.getTime());
+    }
+
+    private void reportDoubleBooking(Appointment a) {
+        view.showFieldError("time", "Dentist already booked");
+        view.setStatusError("Double booking prevented.");
+        view.showError("DOUBLE BOOKING PREVENTED\n\n"
+                + a.getDentistName() + " already has an appointment on "
+                + a.getAppointmentDate() + " at " + a.getAppointmentTime()
+                + ".\n\nPlease choose a different time or dentist.");
     }
 
     // =================================================================
@@ -328,13 +560,12 @@ public class AppointmentController {
             view.setStatusError("Enter a valid number such as APT1001.");
             return;
         }
-
         try {
             currentAppointment = dao.findByNo(view.getSearchNo());
 
             if (currentAppointment == null) {
                 view.setDetails("\n   No appointment found with number "
-                              + view.getSearchNo() + ".\n");
+                        + view.getSearchNo() + ".\n");
                 view.setReceipt("");
                 view.setStatusError("No record found for " + view.getSearchNo() + ".");
                 return;
@@ -358,7 +589,7 @@ public class AppointmentController {
     }
 
     // =================================================================
-    // FUNCTIONALITY 4 - CALCULATE AND PRINT BILL
+    // FUNCTIONALITY 4 - CALCULATE AND PRINT THE BILL
     // =================================================================
     private void generateBill() {
         if (currentAppointment == null) {
@@ -369,75 +600,87 @@ public class AppointmentController {
             view.setStatusError("Consultation fee must be a number of zero or more.");
             return;
         }
-
         try {
-            double treatmentCost = dao.findTreatmentCost(currentAppointment.getTreatmentType());
-            double fee           = Double.parseDouble(view.getConsultationFee());
+            double cost = dao.findTreatmentCost(currentAppointment.getTreatmentType());
+            double fee  = Double.parseDouble(view.getConsultationFee());
 
-            Bill bill = new Bill(currentAppointment, treatmentCost, fee);
+            Bill bill = new Bill(currentAppointment, cost, fee);
             view.setReceipt(bill.generateReceipt());
-            view.setStatusSuccess(String.format("Bill generated. Total LKR %,.2f", bill.getTotal()));
-
+            view.setStatusSuccess(String.format("Bill generated. Total LKR %,.2f",
+                                                bill.getTotal()));
         } catch (Exception ex) {
             view.showError("Could not generate the bill.\n\n" + ex.getMessage());
         }
     }
 
+    /** Writes the receipt to a text file the receptionist can print. */
+    private void saveReceiptToFile() {
+        if (currentAppointment == null || view.getReceiptText().trim().length() < 40) {
+            view.setStatusError("Generate a bill first.");
+            return;
+        }
+        try {
+            File folder = new File("receipts");
+            if (!folder.exists()) {
+                folder.mkdirs();
+            }
+            File file = new File(folder,
+                    "receipt_" + currentAppointment.getAppointmentNo() + ".txt");
+
+            try (PrintWriter out = new PrintWriter(file, "UTF-8")) {
+                out.print(view.getReceiptText());
+            }
+            view.setStatusSuccess("Receipt saved to " + file.getAbsolutePath());
+            view.showInfo("Receipt saved to:\n\n" + file.getAbsolutePath());
+
+        } catch (Exception ex) {
+            view.showError("Could not save the receipt.\n\n" + ex.getMessage());
+        }
+    }
+
     // =================================================================
-    // MANAGEMENT REPORT - reads the vw_daily_schedule SQL view
-    //
-    // Loaded on a SwingWorker for the same reason as the appointment
-    // list: an aggregate query over a year of appointments is slow
-    // enough to freeze the window if run on the Event Dispatch Thread.
+    // MANAGEMENT REPORT
     // =================================================================
     private void loadDailyReport() {
         new SwingWorker<List<String[]>, Void>() {
-
             @Override
             protected List<String[]> doInBackground() throws Exception {
-                return new AppointmentDAO().dailyScheduleReport();
+                return dao.dailyScheduleReport();
             }
-
             @Override
             protected void done() {
                 try {
-                    List<String[]> rows = get();
                     DefaultTableModel model = view.getReportTableModel();
                     model.setRowCount(0);
-                    for (String[] row : rows) {
+                    for (String[] row : get()) {
                         model.addRow(row);
                     }
                 } catch (Exception ex) {
-                    view.setStatus("Daily report could not be loaded.");
+                    view.setStatusError("Daily report could not be loaded.");
                 }
             }
         }.execute();
     }
 
     // =================================================================
-    // PATIENT REMINDERS - generates notification messages
-    //
-    // Runs on a SwingWorker because it queries the database and then
-    // writes a file, either of which could block the interface.
+    // PATIENT REMINDERS
     // =================================================================
     private void generateReminders() {
         view.setStatus("Generating reminders...");
 
         new SwingWorker<List<String>, Void>() {
-
             @Override
             protected List<String> doInBackground() throws Exception {
-                return reminderService.generateTomorrowReminders();
+                return reminders.generateTomorrowReminders();
             }
-
             @Override
             protected void done() {
                 try {
                     List<String> messages = get();
 
                     if (messages.isEmpty()) {
-                        view.setNotifications("No appointments scheduled for tomorrow.\n\n"
-                                + "Nothing to send.");
+                        view.setNotifications("\n  No appointments scheduled for "
+                                + "tomorrow.\n\n  Nothing to send.\n");
                         view.setStatus("No reminders needed.");
                         return;
                     }
@@ -446,14 +689,12 @@ public class AppointmentController {
                     sb.append("REMINDER MESSAGES GENERATED\n");
                     sb.append("===========================\n");
                     sb.append(messages.size()).append(" message(s) queued for dispatch.\n");
-                    sb.append("Written to the '").append(ReminderService.OUTPUT_FOLDER);
-                    sb.append("' folder inside the project.\n\n");
-
+                    sb.append("Written to the '").append(ReminderService.OUTPUT_FOLDER)
+                      .append("' folder inside the project.\n\n");
                     for (int i = 0; i < messages.size(); i++) {
                         sb.append("[").append(i + 1).append("] ")
                           .append(messages.get(i)).append("\n\n");
                     }
-
                     view.setNotifications(sb.toString());
                     view.setStatusSuccess(messages.size() + " reminder(s) generated.");
 
@@ -466,46 +707,140 @@ public class AppointmentController {
     }
 
     // =================================================================
-    // LOGOUT - ends the session and returns to the login screen
-    //
-    // The database connection stays open because the application is
-    // still running; only the session is discarded.
+    // SESSIONS
     // =================================================================
-    private void logout() {
-        int choice = javax.swing.JOptionPane.showConfirmDialog(view,
-                "Log out and return to the login screen?",
-                "Confirm Logout", javax.swing.JOptionPane.YES_NO_OPTION);
+    private void loadActiveSessions() {
+        new SwingWorker<List<String[]>, Void>() {
+            @Override
+            protected List<String[]> doInBackground() throws Exception {
+                sessionDAO.purgeExpired();
+                return sessionDAO.activeSessions();
+            }
+            @Override
+            protected void done() {
+                try {
+                    DefaultTableModel model = view.getSessionTableModel();
+                    model.setRowCount(0);
+                    for (String[] row : get()) {
+                        model.addRow(row);
+                    }
+                    describeSession();
+                    view.setStatus("Active sessions loaded.");
+                } catch (Exception ex) {
+                    view.setStatusError("Could not load sessions.");
+                }
+            }
+        }.execute();
+    }
 
-        if (choice != javax.swing.JOptionPane.YES_OPTION) {
+    /** Describes the current session on the sessions screen. */
+    private void describeSession() {
+        Session session = Session.getInstance();
+        if (session == null) {
             return;
         }
+        view.setSessionInfo(
+              "  Signed in as  : " + session.getUser().getFullName()
+                                   + "  (" + session.getUser().getRole() + ")\n"
+            + "  Signed in at  : " + session.getLoginTimeText() + "\n"
+            + "  Session token : " + Session.mask(session.getToken())
+                                   + "   (stored hashed in the database)\n"
+            + "  Idle timeout  : " + Session.TIMEOUT_MINUTES + " minutes\n"
+            + "  Persistent    : " + (session.isRemembered()
+                                      ? "yes, token saved on this computer"
+                                      : "no, ends when you sign out") + "\n"
+            + "  Token file    : " + SessionStore.location());
+    }
 
-        if (clockThread != null) {
-            clockThread.interrupt();
+    private void signOutEverywhere() {
+        Session session = Session.getInstance();
+        if (session == null) {
+            return;
         }
+        int choice = JOptionPane.showConfirmDialog(view,
+                "Sign out of every machine where this account is signed in?\n\n"
+              + "This includes the session you are using now.",
+                "Sign Out Everywhere", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+        try {
+            int closed = sessionDAO.endAllForUser(session.getUser().getUserId());
+            view.showInfo(closed + " session(s) closed.");
+            endSessionAndReturnToLogin("All sessions were signed out.");
+        } catch (Exception ex) {
+            view.showError("Could not close the sessions.\n\n" + ex.getMessage());
+        }
+    }
+
+    private void logout() {
+        int choice = JOptionPane.showConfirmDialog(view,
+                "Sign out and return to the sign-in screen?",
+                "Confirm Sign Out", JOptionPane.YES_NO_OPTION);
+
+        if (choice == JOptionPane.YES_OPTION) {
+            endSessionAndReturnToLogin("You have been signed out.");
+        }
+    }
+
+    /** Ends the session and reopens the sign-in window. */
+    private void endSessionAndReturnToLogin(String notice) {
+        Session session = Session.getInstance();
+
+        stopThreads();
+        try {
+            if (session != null) {
+                sessionDAO.end(session.getToken());
+            }
+        } catch (Exception ex) {
+            System.err.println("Could not close the session row: " + ex.getMessage());
+        }
+
+        SessionStore.clear();
         Session.end();
         view.dispose();
 
         LoginView loginView = new LoginView();
         new LoginController(loginView, new UserDAO());
+        loginView.setNotice(notice);
         loginView.setVisible(true);
     }
 
     // =================================================================
-    // FUNCTIONALITY 6 - EXIT SYSTEM SAFELY
+    // FUNCTIONALITY 6 - EXIT SAFELY
     // =================================================================
     private void exitApplication() {
         if (!view.confirmExit()) {
             return;
         }
-        // Stop the background clock thread cleanly
-        if (clockThread != null) {
-            clockThread.interrupt();
+        stopThreads();
+
+        // Close the session row so the token cannot be reused, unless the
+        // user asked to be remembered on this machine.
+        try {
+            Session session = Session.getInstance();
+            if (session != null && !session.isRemembered()) {
+                sessionDAO.end(session.getToken());
+            }
+        } catch (Exception ex) {
+            System.err.println("Could not close the session row: " + ex.getMessage());
         }
-        // Release the shared database connection
+
         Session.end();
         DBConnection.close();
         System.out.println("Application closed by " + loggedInUser.getUsername());
         System.exit(0);
+    }
+
+    /** Interrupts both daemon threads so they exit their loops cleanly. */
+    private void stopThreads() {
+        if (clockThread != null) {
+            clockThread.interrupt();
+        }
+        if (sessionThread != null) {
+            sessionThread.interrupt();
+        }
     }
 }

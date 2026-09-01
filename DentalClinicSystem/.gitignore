@@ -1,18 +1,30 @@
-# NetBeans / Ant build output
+# NetBeans
+nbproject/private/
 build/
 dist/
-nbproject/private/
-nbproject/build-impl.xml
-nbproject/genfiles.properties
 nbbuild/
-nbdist/
-.nb-gradle/
 
-# IDE noise
+# Compiled output
 *.class
-*.log
+out/
+*.jar
+!lib/mysql-connector-j-*.jar
+
+# Application output
+reminders/
+receipts/
+
+# IDE and OS
+.idea/
+*.iml
 .DS_Store
 Thumbs.db
 
-# Local config — never commit DB passwords
-local.properties
+# Logs and temp
+*.log
+*.tmp
+*~
+
+# Never commit credentials
+config.properties
+*.env

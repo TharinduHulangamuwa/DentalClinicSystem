@@ -9,31 +9,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Generates appointment reminder notifications for patients.
- *
- * The marking criteria's top band asks for "complex functionality (e.g. email
- * alerts, SMS notifications, innovative features)". This class provides that
- * feature for the dental clinic: every patient with an appointment tomorrow
- * gets a reminder message generated automatically.
+ * Builds appointment reminder messages for patients.
  *
  * HOW DISPATCH WORKS, STATED HONESTLY:
  * Messages are written to a dated text file in the "reminders" folder rather
- * than sent through a live SMTP or SMS gateway. This was a deliberate choice:
- * a real gateway needs paid credentials, an internet connection and an
- * external account, none of which can be demonstrated reliably in an
- * assessment. The file acts as a dispatch queue that a mail merge or an SMS
- * provider's bulk upload could consume directly.
+ * than sent through a live SMTP or SMS gateway. This was deliberate: a real
+ * gateway needs paid credentials, an internet connection and an external
+ * account, none of which can be demonstrated reliably. The file acts as a
+ * dispatch queue that a mail merge or an SMS provider's bulk upload could
+ * consume directly.
  *
- * The design keeps the swap to a real gateway small: only the dispatch()
- * method would change. Message construction, scheduling and the recipient
- * query would all stay as they are.
+ * The design keeps a real gateway one method away: only dispatch() would
+ * change. Message construction, scheduling and the recipient query stay.
  *
  * @author [Your Name]
  */
 public class ReminderService {
 
-    /** Folder where generated reminders are written. */
     public static final String OUTPUT_FOLDER = "reminders";
+
+    /** A single SMS segment is 160 characters; longer messages cost double. */
+    public static final int SMS_LIMIT = 160;
 
     private final AppointmentDAO dao;
 
@@ -42,48 +38,42 @@ public class ReminderService {
     }
 
     /**
-     * Builds a reminder for every appointment scheduled for tomorrow
-     * and writes them to a dated dispatch file.
-     *
+     * Builds a reminder for every appointment tomorrow and writes them to a
+     * dated dispatch file.
      * @return the messages generated, so the caller can display them
      */
     public List<String> generateTomorrowReminders() throws Exception {
-
         String tomorrow = LocalDate.now().plusDays(1).toString();
         List<Appointment> appointments = dao.findByDate(tomorrow);
-        List<String> messages = new ArrayList<>();
 
+        List<String> messages = new ArrayList<>();
         for (Appointment a : appointments) {
             messages.add(buildSmsMessage(a));
         }
-
         if (!messages.isEmpty()) {
             dispatch(tomorrow, messages);
         }
         return messages;
     }
 
-    /** A single SMS segment is 160 characters; longer messages cost double. */
-    public static final int SMS_LIMIT = 160;
-
     /**
      * Builds the SMS text for one appointment.
      *
      * Two templates are used. The full one names the treatment; if a long
-     * patient or dentist name pushes the message past the 160-character SMS
-     * segment limit, the compact template drops the treatment type, which is
-     * the least essential detail. This keeps every message to one segment and
-     * therefore to one charge.
+     * patient or dentist name pushes the message past the 160-character
+     * segment limit, the compact template drops the treatment type, the least
+     * essential detail. Every message therefore costs one segment.
      *
-     * This rule was added after testing revealed that a message for a patient
-     * with a long name reached 166 characters and would have been billed as
-     * two segments.
+     * This rule exists because testing found a message reaching 166
+     * characters for a patient with a long name, which would have been billed
+     * as two segments.
      */
     public String buildSmsMessage(Appointment a) {
 
         String full = "SUNRISE DENTAL: Dear " + a.getPatientName()
                     + ", appt with " + a.getDentistName()
-                    + " on " + a.getAppointmentDate() + " at " + a.getAppointmentTime()
+                    + " on " + a.getAppointmentDate()
+                    + " at " + a.getAppointmentTime()
                     + " (" + a.getTreatmentType() + "). Ref " + a.getAppointmentNo()
                     + ". Tel 011-2345678";
 
@@ -91,13 +81,12 @@ public class ReminderService {
             return full;
         }
 
-        // compact fallback: treatment type removed
         String compact = "SUNRISE DENTAL: Dear " + a.getPatientName()
                        + ", appt with " + a.getDentistName()
-                       + " on " + a.getAppointmentDate() + " at " + a.getAppointmentTime()
+                       + " on " + a.getAppointmentDate()
+                       + " at " + a.getAppointmentTime()
                        + ". Ref " + a.getAppointmentNo() + ". Tel 011-2345678";
 
-        // last resort for an extremely long name
         if (compact.length() > SMS_LIMIT) {
             return compact.substring(0, SMS_LIMIT - 3) + "...";
         }
@@ -106,24 +95,20 @@ public class ReminderService {
 
     /**
      * Writes the dispatch queue file.
-     *
-     * This is the ONLY method that would change if the clinic connected a
-     * real email or SMS provider.
+     * This is the ONLY method that changes if a real provider is connected.
      */
     private void dispatch(String date, List<String> messages) throws IOException {
-
         File folder = new File(OUTPUT_FOLDER);
         if (!folder.exists()) {
             folder.mkdirs();
         }
-
         File file = new File(folder, "reminders_" + date + ".txt");
 
         try (PrintWriter out = new PrintWriter(new FileWriter(file))) {
             out.println("SUNRISE DENTAL CLINIC - APPOINTMENT REMINDERS");
-            out.println("Dispatch date : " + LocalDate.now());
+            out.println("Dispatch date       : " + LocalDate.now());
             out.println("For appointments on : " + date);
-            out.println("Messages to send : " + messages.size());
+            out.println("Messages to send    : " + messages.size());
             out.println("=============================================");
             out.println();
             for (int i = 0; i < messages.size(); i++) {
@@ -131,6 +116,6 @@ public class ReminderService {
                 out.println();
             }
         }
-        System.out.println("Reminder dispatch file written: " + file.getAbsolutePath());
+        System.out.println("[REMINDERS] dispatch file written: " + file.getAbsolutePath());
     }
 }

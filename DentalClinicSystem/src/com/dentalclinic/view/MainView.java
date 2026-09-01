@@ -1,6 +1,7 @@
 package com.dentalclinic.view;
 
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
@@ -18,6 +19,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -26,34 +29,67 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableModel;
 
 /**
- * PRESENTATION TIER - main application window.
+ * PRESENTATION TIER - the main application window.
  *
- * Six tabs cover the functionalities required by the scenario plus the
- * reporting and notification features added in version 1.1.
+ * LAYOUT: BorderLayout, GridLayout, FlowLayout, BoxLayout and CardLayout
+ * only. An earlier version used GridBagLayout and shipped a defect where
+ * text fields rendered at zero width; the simpler layouts remove that
+ * whole class of problem because GridLayout stretches each component to
+ * fill its cell automatically.
  *
- * LAYOUT: only BorderLayout, GridLayout and FlowLayout are used. An earlier
- * version used GridBagLayout and shipped a defect where text fields rendered
- * at zero width. The simpler layouts remove that whole class of problem,
- * because GridLayout stretches each component to fill its cell automatically.
+ * INTERFACE DESIGN DECISIONS
  *
- * USABILITY (version 1.2): validation errors now appear beside the field that
- * caused them, in red, with the field itself tinted. Previously every error
- * was a modal dialog, which meant the user had to read the message, dismiss
- * it, then remember which field it referred to. Inline messages remove that
- * memory step and let the user see several problems at once.
+ * 1. Sidebar navigation rather than tabs. Tabs work for three or four
+ *    screens and become cramped beyond that. A sidebar scales, keeps
+ *    every destination visible, and marks the current one with an accent
+ *    bar.
+ *
+ * 2. A dashboard as the opening screen. The receptionist's first question
+ *    each morning is how busy the day is; one large number answers that
+ *    faster than a table they must read and count.
+ *
+ * 3. Validation errors appear beside the field that caused them, and all
+ *    fields are checked in one pass. The previous approach - one modal
+ *    dialog per error - forced the user to read a message, dismiss it,
+ *    then remember which field it referred to.
  *
  * @author [Your Name]
  */
 public class MainView extends JFrame {
 
-    // ---------- Tab 1: register ----------
+    // ---------------- screen keys ----------------
+    public static final String SCREEN_DASHBOARD = "dashboard";
+    public static final String SCREEN_REGISTER  = "register";
+    public static final String SCREEN_BILL      = "bill";
+    public static final String SCREEN_LIST      = "list";
+    public static final String SCREEN_SUMMARY   = "summary";
+    public static final String SCREEN_REMINDERS = "reminders";
+    public static final String SCREEN_SESSIONS  = "sessions";
+    public static final String SCREEN_HELP      = "help";
+
+    private final CardLayout cards   = new CardLayout();
+    private final JPanel     content = new JPanel(cards);
+    private final Map<String, NavButton> navButtons = new LinkedHashMap<>();
+
+    // ---------------- dashboard ----------------
+    private final StatCard cardToday    = new StatCard("Appointments today", "0", Theme.ACCENT);
+    private final StatCard cardTomorrow = new StatCard("Tomorrow", "0", Theme.SUCCESS);
+    private final StatCard cardTotal    = new StatCard("Total on record", "0", Theme.NAVY_LIGHT);
+    private final StatCard cardRevenue  = new StatCard("Today's expected revenue (LKR)", "0.00", Theme.WARNING);
+
+    private final DefaultTableModel todayModel = new DefaultTableModel(
+            new String[]{"Time", "Appt No", "Patient", "Dentist", "Treatment"}, 0) {
+        @Override public boolean isCellEditable(int r, int c) { return false; }
+    };
+    private final StripedTable tblToday = new StripedTable(todayModel);
+
+    // ---------------- register ----------------
     private final JTextField txtAppointmentNo = new JTextField();
     private final JTextField txtPatientName   = new JTextField();
     private final JTextField txtAddress       = new JTextField();
@@ -64,229 +100,363 @@ public class MainView extends JFrame {
     private final JTextField txtDate = new JTextField();
     private final JTextField txtTime = new JTextField();
 
-    private final JButton btnSave     = Theme.primaryButton("Save Appointment", 'S',
+    private final JButton btnSave     = Theme.primary("Save Appointment", 'S',
             "Save this appointment (Alt+S)");
-    private final JButton btnClear    = Theme.button("Clear Form", 'C',
+    private final JButton btnUpdate   = Theme.secondary("Update", 'U',
+            "Save changes to the loaded appointment (Alt+U)");
+    private final JButton btnClear    = Theme.secondary("Clear", 'C',
             "Empty every field (Alt+C)");
-    private final JButton btnToday    = Theme.button("Today", 'T', "Fill in today's date");
-    private final JButton btnTomorrow = Theme.button("Tomorrow", 'M', "Fill in tomorrow's date");
+    private final JButton btnToday    = Theme.secondary("Today", 'T', "Use today's date");
+    private final JButton btnTomorrow = Theme.secondary("Tomorrow", 'M', "Use tomorrow's date");
+    private final JLabel  lblFormMode = new JLabel(" ");
 
-    /** One error label per field, so messages appear where the problem is. */
-    private final Map<String, JLabel> errorLabels = new LinkedHashMap<>();
-    private final Map<String, JComponent> fields  = new LinkedHashMap<>();
+    private final Map<String, JLabel>     errorLabels = new LinkedHashMap<>();
+    private final Map<String, JComponent> fields      = new LinkedHashMap<>();
 
-    // ---------- Tab 2: search and bill ----------
-    private final JTextField txtSearchNo        = new JTextField(10);
-    private final JButton    btnSearch          = Theme.primaryButton("Search", 'R',
+    // ---------------- bill ----------------
+    private final JTextField txtSearchNo        = new JTextField(12);
+    private final JButton    btnSearch          = Theme.primary("Search", 'R',
             "Find this appointment (Alt+R, or press Enter)");
     private final JTextArea  txtDetails         = new JTextArea();
     private final JTextField txtConsultationFee = new JTextField("1500", 8);
-    private final JButton    btnBill            = Theme.primaryButton("Calculate Bill", 'B',
+    private final JButton    btnBill            = Theme.primary("Calculate Bill", 'B',
             "Work out the total and print the receipt (Alt+B)");
+    private final JButton    btnSaveReceipt     = Theme.secondary("Save Receipt", 'V',
+            "Write the receipt to a text file");
     private final JTextArea  txtReceipt         = new JTextArea();
 
-    // ---------- Tab 3: all appointments ----------
+    // ---------------- appointment list ----------------
     private final DefaultTableModel tableModel = new DefaultTableModel(
             new String[]{"Appt No", "Patient", "Contact", "Dentist",
                          "Treatment", "Date", "Time"}, 0) {
-        @Override
-        public boolean isCellEditable(int row, int col) {
-            return false;
-        }
+        @Override public boolean isCellEditable(int r, int c) { return false; }
     };
     private final StripedTable tblAppointments = new StripedTable(tableModel);
-    private final JButton btnRefresh = Theme.button("Refresh", 'F',
-            "Reload the list from the database (Alt+F)");
+    private final JTextField txtFilter   = new JTextField(18);
+    private final JButton btnRefresh     = Theme.secondary("Refresh", 'F',
+            "Reload from the database (Alt+F)");
+    private final JButton btnEdit        = Theme.secondary("Edit Selected", 'E',
+            "Load the selected appointment into the register form");
+    private final JButton btnDelete      = Theme.danger("Delete Selected", 'D',
+            "Permanently remove the selected appointment");
 
-    // ---------- Tab 4: daily summary ----------
+    // ---------------- summary ----------------
     private final DefaultTableModel reportModel = new DefaultTableModel(
             new String[]{"Date", "Dentist", "Appointments", "Expected Revenue (LKR)"}, 0) {
-        @Override
-        public boolean isCellEditable(int row, int col) {
-            return false;
-        }
+        @Override public boolean isCellEditable(int r, int c) { return false; }
     };
     private final StripedTable tblReport = new StripedTable(reportModel);
-    private final JButton btnReportRefresh = Theme.button("Refresh Report", 'P',
-            "Recalculate the daily summary (Alt+P)");
+    private final JButton btnReportRefresh = Theme.secondary("Refresh Report", 'P',
+            "Recalculate the summary (Alt+P)");
 
-    // ---------- Tab 5: reminders ----------
+    // ---------------- reminders ----------------
     private final JTextArea txtNotifications = new JTextArea();
-    private final JButton   btnSendReminders = Theme.primaryButton(
+    private final JButton   btnSendReminders = Theme.primary(
             "Generate Tomorrow's Reminders", 'G', "Build reminder messages (Alt+G)");
 
-    // ---------- status bar ----------
-    private final JLabel  lblStatus = new JLabel("  Ready");
-    private final JLabel  lblUser   = new JLabel("", SwingConstants.CENTER);
-    private final JLabel  lblClock  = new JLabel();
-    private final JButton btnLogout = Theme.button("Logout", 'L',
-            "End this session and return to the login screen (Alt+L)");
+    // ---------------- sessions ----------------
+    private final DefaultTableModel sessionModel = new DefaultTableModel(
+            new String[]{"Username", "Full Name", "Machine",
+                         "Signed In", "Last Activity", "Idle"}, 0) {
+        @Override public boolean isCellEditable(int r, int c) { return false; }
+    };
+    private final StripedTable tblSessions = new StripedTable(sessionModel);
+    private final JTextArea txtSessionInfo   = new JTextArea();
+    private final JButton btnSessionRefresh  = Theme.secondary("Refresh", 'H',
+            "Reload the active session list");
+    private final JButton btnEndAllSessions  = Theme.danger("Sign Out Everywhere", 'X',
+            "Close this account's sessions on every machine");
 
-    private final JTabbedPane tabs = new JTabbedPane();
+    // ---------------- header and status ----------------
+    private final JLabel  lblScreenTitle = new JLabel("Dashboard");
+    private final JLabel  lblUser        = new JLabel();
+    private final JLabel  lblSession     = new JLabel();
+    private final JLabel  lblStatus      = new JLabel("Ready");
+    private final JLabel  lblClock       = new JLabel();
+    private final JButton btnLogout      = Theme.onDark("Sign Out", 'L',
+            "End this session (Alt+L)");
 
-    /** Kept so clicking a table row can trigger the same action as the button. */
     private ActionListener searchListener;
 
     public MainView() {
         setTitle("Sunrise Dental Clinic - Appointment Management System");
-        setSize(940, 690);
-        setMinimumSize(new Dimension(860, 620));
+        setSize(1150, 740);
+        setMinimumSize(new Dimension(1040, 660));
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
+        getContentPane().setBackground(Theme.CANVAS);
 
-        tabs.setFont(Theme.LABEL);
-        tabs.addTab("Register Appointment", buildRegisterPanel());
-        tabs.addTab("Search & Bill",        buildBillPanel());
-        tabs.addTab("All Appointments",     buildListPanel());
-        tabs.addTab("Daily Summary",        buildSummaryPanel());
-        tabs.addTab("Reminders",            buildNotificationPanel());
-        tabs.addTab("Help",                 buildHelpPanel());
+        content.setBackground(Theme.CANVAS);
+        content.add(buildDashboardScreen(), SCREEN_DASHBOARD);
+        content.add(buildRegisterScreen(),  SCREEN_REGISTER);
+        content.add(buildBillScreen(),      SCREEN_BILL);
+        content.add(buildListScreen(),      SCREEN_LIST);
+        content.add(buildSummaryScreen(),   SCREEN_SUMMARY);
+        content.add(buildRemindersScreen(), SCREEN_REMINDERS);
+        content.add(buildSessionsScreen(),  SCREEN_SESSIONS);
+        content.add(buildHelpScreen(),      SCREEN_HELP);
 
-        add(buildHeader(),    BorderLayout.NORTH);
-        add(tabs,             BorderLayout.CENTER);
-        add(buildStatusBar(), BorderLayout.SOUTH);
+        JPanel main = new JPanel(new BorderLayout());
+        main.setBackground(Theme.CANVAS);
+        main.add(buildHeader(),    BorderLayout.NORTH);
+        main.add(content,          BorderLayout.CENTER);
+        main.add(buildStatusBar(), BorderLayout.SOUTH);
+
+        add(buildSidebar(), BorderLayout.WEST);
+        add(main,           BorderLayout.CENTER);
 
         wireConvenienceKeys();
-    }
-
-    /** Clinic banner, so the window is identifiable at a glance. */
-    private JPanel buildHeader() {
-        JLabel title = new JLabel("  Sunrise Dental Clinic");
-        title.setFont(Theme.TITLE);
-        title.setForeground(Color.WHITE);
-
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Theme.BRAND);
-        panel.setBorder(Theme.pad(10, 10, 10, 10));
-        panel.add(title, BorderLayout.WEST);
-        return panel;
+        showScreen(SCREEN_DASHBOARD, "Dashboard");
     }
 
     // =================================================================
-    // TAB 1 - register a new appointment
+    // SIDEBAR
+    // =================================================================
+    private JPanel buildSidebar() {
+        JPanel bar = new JPanel();
+        bar.setLayout(new BoxLayout(bar, BoxLayout.Y_AXIS));
+        bar.setBackground(Theme.NAVY);
+        bar.setPreferredSize(new Dimension(240, 0));
+
+        JLabel brand = new JLabel("Sunrise Dental");
+        brand.setFont(Theme.BRAND);
+        brand.setForeground(Color.WHITE);
+        brand.setBorder(Theme.pad(22, 26, 2, 16));
+        brand.setAlignmentX(LEFT_ALIGNMENT);
+
+        JLabel sub = new JLabel("Clinic Management");
+        sub.setFont(Theme.SMALL);
+        sub.setForeground(Theme.TEXT_FADED);
+        sub.setBorder(Theme.pad(0, 26, 22, 16));
+        sub.setAlignmentX(LEFT_ALIGNMENT);
+
+        bar.add(brand);
+        bar.add(sub);
+
+        addNav(bar, SCREEN_DASHBOARD, "Dashboard");
+        addNav(bar, SCREEN_REGISTER,  "Register Appointment");
+        addNav(bar, SCREEN_BILL,      "Search & Bill");
+        addNav(bar, SCREEN_LIST,      "All Appointments");
+        addNav(bar, SCREEN_SUMMARY,   "Daily Summary");
+        addNav(bar, SCREEN_REMINDERS, "Patient Reminders");
+        addNav(bar, SCREEN_SESSIONS,  "Active Sessions");
+        addNav(bar, SCREEN_HELP,      "Help");
+
+        bar.add(Box.createVerticalGlue());
+
+        JLabel version = new JLabel("Version 1.3");
+        version.setFont(Theme.SMALL);
+        version.setForeground(new Color(120, 145, 170));
+        version.setBorder(Theme.pad(0, 26, 18, 16));
+        version.setAlignmentX(LEFT_ALIGNMENT);
+        bar.add(version);
+        return bar;
+    }
+
+    private void addNav(JPanel bar, String screen, String label) {
+        NavButton b = new NavButton(label);
+        b.setAlignmentX(LEFT_ALIGNMENT);
+        b.addActionListener(e -> showScreen(screen, label));
+        navButtons.put(screen, b);
+        bar.add(b);
+    }
+
+    /** Switches the visible screen and moves the sidebar highlight. */
+    public void showScreen(String screen, String title) {
+        cards.show(content, screen);
+        lblScreenTitle.setText(title);
+        for (Map.Entry<String, NavButton> e : navButtons.entrySet()) {
+            e.getValue().setSelected(e.getKey().equals(screen));
+        }
+    }
+
+    // =================================================================
+    // HEADER
+    // =================================================================
+    private JPanel buildHeader() {
+        lblScreenTitle.setFont(Theme.TITLE);
+        lblScreenTitle.setForeground(Color.WHITE);
+
+        lblUser.setFont(Theme.BODY);
+        lblUser.setForeground(Theme.TEXT_ON_DARK);
+        lblUser.setHorizontalAlignment(SwingConstants.RIGHT);
+
+        lblSession.setFont(Theme.SMALL);
+        lblSession.setForeground(Theme.TEXT_FADED);
+        lblSession.setHorizontalAlignment(SwingConstants.RIGHT);
+
+        JPanel userBox = new JPanel(new GridLayout(2, 1));
+        userBox.setBackground(Theme.NAVY_LIGHT);
+        userBox.add(lblUser);
+        userBox.add(lblSession);
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 14, 0));
+        right.setBackground(Theme.NAVY_LIGHT);
+        right.add(userBox);
+        right.add(btnLogout);
+
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBackground(Theme.NAVY_LIGHT);
+        header.setBorder(Theme.pad(14, 26, 14, 16));
+        header.add(lblScreenTitle, BorderLayout.WEST);
+        header.add(right,          BorderLayout.EAST);
+        return header;
+    }
+
+    // =================================================================
+    // SCREEN - dashboard
+    // =================================================================
+    private JPanel buildDashboardScreen() {
+        JPanel stats = Theme.canvas(new GridLayout(1, 4, 16, 0));
+        stats.add(cardToday);
+        stats.add(cardTomorrow);
+        stats.add(cardTotal);
+        stats.add(cardRevenue);
+
+        tblToday.width(0, 70);
+        tblToday.width(1, 90);
+        JScrollPane scroll = new JScrollPane(tblToday);
+        scroll.setBorder(Theme.titledCard("Today's Schedule"));
+        scroll.getViewport().setBackground(Theme.CARD);
+
+        JPanel screen = Theme.canvas(new BorderLayout(0, 18));
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(stats,  BorderLayout.NORTH);
+        screen.add(scroll, BorderLayout.CENTER);
+        return screen;
+    }
+
+    // =================================================================
+    // SCREEN - register
     //
     // Three columns: label, input, message. The third column holds the
-    // helper text, and the same label switches to a red error message
-    // when validation fails, so feedback appears exactly where the
-    // problem is rather than in a dialog the user must dismiss.
+    // helper text and switches to a red error message when validation
+    // fails, so feedback appears where the problem is.
     // =================================================================
-    private JPanel buildRegisterPanel() {
+    private JPanel buildRegisterScreen() {
+        JPanel form = Theme.white(new GridLayout(8, 3, 12, 10));
+        form.setBorder(Theme.titledCard("Patient and Appointment Details"));
 
-        JPanel form = new JPanel(new GridLayout(8, 3, 10, 8));
-        form.setBorder(BorderFactory.createTitledBorder("Patient and Appointment Details"));
+        addRow(form, "appointmentNo", "Appointment No:", txtAppointmentNo, "format APT1001");
+        addRow(form, "patientName",   "Patient Name:",   txtPatientName,   "letters and spaces");
+        addRow(form, "address",       "Address:",        txtAddress,       "optional");
+        addRow(form, "contactNo",     "Contact No:",     txtContactNo,     "10 digits, e.g. 0771234567");
+        addRow(form, "dentistName",   "Dentist:",        cmbDentist,       "");
+        addRow(form, "treatmentType", "Treatment Type:", cmbTreatment,     "price from the database");
+        addRow(form, "date",          "Date:",           txtDate,          "yyyy-MM-dd");
+        addRow(form, "time",          "Time:",           txtTime,          "HH:mm, clinic 08:00-20:00");
 
-        addRow(form, "appointmentNo", "Appointment No:", txtAppointmentNo,
-               "format APT1001");
-        addRow(form, "patientName",   "Patient Name:",   txtPatientName,
-               "letters and spaces");
-        addRow(form, "address",       "Address:",        txtAddress,
-               "optional");
-        addRow(form, "contactNo",     "Contact No:",     txtContactNo,
-               "10 digits, e.g. 0771234567");
-        addRow(form, "dentistName",   "Dentist:",        cmbDentist,
-               "");
-        addRow(form, "treatmentType", "Treatment Type:", cmbTreatment,
-               "price comes from the database");
-        addRow(form, "date",          "Date:",           txtDate,
-               "yyyy-MM-dd");
-        addRow(form, "time",          "Time:",           txtTime,
-               "HH:mm, clinic open 08:00-20:00");
+        lblFormMode.setFont(Theme.SMALL);
+        lblFormMode.setForeground(Theme.ACCENT_DARK);
 
-        // quick date fill, so staff booking for tomorrow need not type a date
-        JPanel dateHelpers = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        dateHelpers.add(Theme.hint("Quick fill:"));
-        dateHelpers.add(btnToday);
-        dateHelpers.add(btnTomorrow);
+        JPanel quick = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 8, 8));
+        quick.add(Theme.hint("Quick date:"));
+        quick.add(btnToday);
+        quick.add(btnTomorrow);
+        quick.add(Box.createHorizontalStrut(20));
+        quick.add(lblFormMode);
 
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 12));
-        buttons.add(btnSave);
-        buttons.add(btnClear);
+        JPanel actions = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        actions.add(btnSave);
+        actions.add(btnUpdate);
+        actions.add(btnClear);
+        btnUpdate.setVisible(false);      // only shown while editing
 
-        JPanel south = new JPanel(new BorderLayout());
-        south.add(dateHelpers, BorderLayout.NORTH);
-        south.add(buttons,     BorderLayout.CENTER);
+        JPanel below = Theme.canvas(new BorderLayout());
+        below.add(quick,   BorderLayout.NORTH);
+        below.add(actions, BorderLayout.CENTER);
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(Theme.pad(15, 25, 10, 25));
-        panel.add(form,  BorderLayout.NORTH);
-        panel.add(south, BorderLayout.CENTER);
-        return panel;
+        JPanel screen = Theme.canvas(new BorderLayout());
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(form,  BorderLayout.NORTH);
+        screen.add(below, BorderLayout.CENTER);
+        return screen;
     }
 
-    /** Adds one label / input / message row and registers it for error display. */
     private void addRow(JPanel form, String key, String label,
                         JComponent field, String hint) {
-        field.setFont(Theme.LABEL);
+        field.setFont(Theme.BODY);
         if (field instanceof JTextField) {
-            field.setBorder(Theme.FIELD_BORDER);
+            field.setBorder(Theme.FIELD);
         }
-
         JLabel message = Theme.hint(hint);
-
         form.add(Theme.formLabel(label));
         form.add(field);
         form.add(message);
-
         fields.put(key, field);
         errorLabels.put(key, message);
     }
 
     // =================================================================
-    // TAB 2 - search and bill
+    // SCREEN - search and bill
     // =================================================================
-    private JPanel buildBillPanel() {
+    private JPanel buildBillScreen() {
+        txtSearchNo.setFont(Theme.BODY);
+        txtSearchNo.setBorder(Theme.FIELD);
+        txtSearchNo.setToolTipText("An appointment number such as APT1001");
 
-        txtSearchNo.setFont(Theme.LABEL);
-        txtSearchNo.setBorder(Theme.FIELD_BORDER);
-        txtSearchNo.setToolTipText("Type an appointment number such as APT1001");
+        txtConsultationFee.setFont(Theme.BODY);
+        txtConsultationFee.setBorder(Theme.FIELD);
+        txtConsultationFee.setToolTipText("Fee for this consultation, in rupees");
 
-        txtConsultationFee.setFont(Theme.LABEL);
-        txtConsultationFee.setBorder(Theme.FIELD_BORDER);
-        txtConsultationFee.setToolTipText("Fee charged for this consultation, in rupees");
+        // Two explicit rows rather than one wrapping FlowLayout.
+        // A FlowLayout reports the preferred height of a SINGLE row even when
+        // it wraps, so in a BorderLayout.NORTH slot the wrapped row is clipped
+        // and its buttons become unreachable. Laying the rows out explicitly
+        // removes that failure entirely.
+        JPanel rowFind = Theme.white(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        rowFind.add(Theme.formLabel("Appointment No:"));
+        rowFind.add(txtSearchNo);
+        rowFind.add(btnSearch);
 
-        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 10));
-        top.setBorder(BorderFactory.createTitledBorder("Find an appointment, then bill it"));
-        top.add(new JLabel("Appointment No:"));
-        top.add(txtSearchNo);
-        top.add(btnSearch);
-        top.add(Theme.hint("        "));
-        top.add(new JLabel("Consultation Fee (LKR):"));
-        top.add(txtConsultationFee);
-        top.add(btnBill);
+        JPanel rowBill = Theme.white(new FlowLayout(FlowLayout.LEFT, 10, 4));
+        rowBill.add(Theme.formLabel("Consultation Fee (LKR):"));
+        rowBill.add(txtConsultationFee);
+        rowBill.add(btnBill);
+        rowBill.add(btnSaveReceipt);
+
+        JPanel controls = Theme.white(new GridLayout(2, 1, 0, 4));
+        controls.setBorder(Theme.titledCard("Find an appointment, then bill it"));
+        controls.add(rowFind);
+        controls.add(rowBill);
 
         txtDetails.setEditable(false);
         txtDetails.setFont(Theme.MONO);
-        txtDetails.setBorder(BorderFactory.createTitledBorder("Appointment Details"));
-        txtDetails.setText("\n   Search for an appointment number to see the patient record here.\n");
+        txtDetails.setBackground(Theme.CARD);
+        txtDetails.setText("\n   Search for an appointment number to see the record here.\n");
 
         txtReceipt.setEditable(false);
         txtReceipt.setFont(Theme.MONO);
-        txtReceipt.setBorder(BorderFactory.createTitledBorder("Patient Receipt"));
-        txtReceipt.setText("\n   The receipt will appear here once you calculate the bill.\n");
+        txtReceipt.setBackground(Theme.CARD);
+        txtReceipt.setText("\n   The receipt appears here once you calculate the bill.\n");
 
-        JPanel centre = new JPanel(new GridLayout(2, 1, 5, 5));
-        centre.add(new JScrollPane(txtDetails));
-        centre.add(new JScrollPane(txtReceipt));
+        JScrollPane detail = new JScrollPane(txtDetails);
+        detail.setBorder(Theme.titledCard("Appointment Details"));
+        JScrollPane receipt = new JScrollPane(txtReceipt);
+        receipt.setBorder(Theme.titledCard("Patient Receipt"));
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(top,    BorderLayout.NORTH);
-        panel.add(centre, BorderLayout.CENTER);
-        return panel;
+        JPanel panes = Theme.canvas(new GridLayout(2, 1, 0, 14));
+        panes.add(detail);
+        panes.add(receipt);
+
+        JPanel screen = Theme.canvas(new BorderLayout(0, 14));
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(controls, BorderLayout.NORTH);
+        screen.add(panes,    BorderLayout.CENTER);
+        return screen;
     }
 
     // =================================================================
-    // TAB 3 - every appointment
+    // SCREEN - all appointments
     // =================================================================
-    private JPanel buildListPanel() {
+    private JPanel buildListScreen() {
+        tblAppointments.width(0, 90);
+        tblAppointments.width(1, 170);
+        tblAppointments.width(4, 150);
 
-        tblAppointments.width(0, 80);
-        tblAppointments.width(1, 160);
-        tblAppointments.width(4, 140);
-
-        // Double clicking a row jumps to the billing tab with that record
-        // loaded. Retyping a number the user can already see on screen is
-        // wasted effort and a chance to mistype.
+        // Double clicking a row bills it. Retyping a number the user can
+        // already see on screen is wasted effort and a chance to mistype.
         tblAppointments.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -296,169 +466,225 @@ public class MainView extends JFrame {
             }
         });
 
-        JLabel hint = Theme.hint("  Double click a row to open it in Search & Bill."
-                + "  Click a column heading to sort.");
+        txtFilter.setFont(Theme.BODY);
+        txtFilter.setBorder(Theme.FIELD);
+        txtFilter.setToolTipText("Filter by patient, number, contact or dentist");
 
-        JPanel south = new JPanel();
-        south.add(btnRefresh);
+        JPanel top = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        top.add(Theme.formLabel("Filter:"));
+        top.add(txtFilter);
+        top.add(Theme.hint("   Double click a row to bill it.  Click a heading to sort."));
+        top.setBorder(Theme.pad(0, 0, 10, 0));
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(hint, BorderLayout.NORTH);
-        panel.add(new JScrollPane(tblAppointments), BorderLayout.CENTER);
-        panel.add(south, BorderLayout.SOUTH);
-        return panel;
+        JScrollPane scroll = new JScrollPane(tblAppointments);
+        scroll.setBorder(Theme.hairline());
+        scroll.getViewport().setBackground(Theme.CARD);
+
+        JPanel bottom = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        bottom.add(btnRefresh);
+        bottom.add(btnEdit);
+        bottom.add(btnDelete);
+
+        JPanel screen = Theme.canvas(new BorderLayout());
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(top,    BorderLayout.NORTH);
+        screen.add(scroll, BorderLayout.CENTER);
+        screen.add(bottom, BorderLayout.SOUTH);
+        return screen;
     }
 
-    /** Copies the selected appointment number into the billing tab and searches. */
     private void openSelectedInBilling() {
-        int row = tblAppointments.getSelectedRow();
-        if (row < 0) {
+        String number = getSelectedAppointmentNo();
+        if (number == null) {
             return;
         }
-        int modelRow = tblAppointments.convertRowIndexToModel(row);
-        String number = String.valueOf(tableModel.getValueAt(modelRow, 0));
-
         txtSearchNo.setText(number);
-        tabs.setSelectedIndex(1);
-
+        showScreen(SCREEN_BILL, "Search & Bill");
         if (searchListener != null) {
             searchListener.actionPerformed(new ActionEvent(this, 0, "search"));
         }
     }
 
     // =================================================================
-    // TAB 4 - management summary
+    // SCREEN - daily summary
     // =================================================================
-    private JPanel buildSummaryPanel() {
-
+    private JPanel buildSummaryScreen() {
         tblReport.rightAlign(2);
         tblReport.rightAlign(3);
 
-        JLabel note = Theme.hint(
-            "  Appointments and expected treatment revenue per dentist per day.");
+        JScrollPane scroll = new JScrollPane(tblReport);
+        scroll.setBorder(Theme.hairline());
+        scroll.getViewport().setBackground(Theme.CARD);
 
-        JPanel south = new JPanel();
-        south.add(btnReportRefresh);
+        JPanel top = Theme.canvas(new BorderLayout());
+        top.add(Theme.hint("Appointments and expected treatment revenue "
+                + "per dentist per day."), BorderLayout.WEST);
+        top.setBorder(Theme.pad(0, 0, 10, 0));
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(note, BorderLayout.NORTH);
-        panel.add(new JScrollPane(tblReport), BorderLayout.CENTER);
-        panel.add(south, BorderLayout.SOUTH);
-        return panel;
+        JPanel bottom = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 0, 10));
+        bottom.add(btnReportRefresh);
+
+        JPanel screen = Theme.canvas(new BorderLayout());
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(top,    BorderLayout.NORTH);
+        screen.add(scroll, BorderLayout.CENTER);
+        screen.add(bottom, BorderLayout.SOUTH);
+        return screen;
     }
 
     // =================================================================
-    // TAB 5 - patient reminders
+    // SCREEN - reminders
     // =================================================================
-    private JPanel buildNotificationPanel() {
-
+    private JPanel buildRemindersScreen() {
         txtNotifications.setEditable(false);
         txtNotifications.setFont(Theme.MONO);
+        txtNotifications.setBackground(Theme.CARD);
         txtNotifications.setText(
             "\n  No reminders generated yet.\n\n"
-          + "  Click the button below to build reminder messages for every\n"
-          + "  patient with an appointment tomorrow. Messages are written to\n"
-          + "  the 'reminders' folder inside the project, ready for the\n"
-          + "  clinic's SMS provider or a mail merge.\n");
+          + "  Use the button below to build reminder messages for every\n"
+          + "  patient with an appointment tomorrow. Messages are written\n"
+          + "  to the 'reminders' folder, ready for the clinic's SMS\n"
+          + "  provider or a mail merge.\n");
 
-        JPanel south = new JPanel();
-        south.add(btnSendReminders);
+        JScrollPane scroll = new JScrollPane(txtNotifications);
+        scroll.setBorder(Theme.titledCard("Generated Messages"));
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(new JScrollPane(txtNotifications), BorderLayout.CENTER);
-        panel.add(south, BorderLayout.SOUTH);
-        return panel;
+        JPanel bottom = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 0, 10));
+        bottom.add(btnSendReminders);
+
+        JPanel screen = Theme.canvas(new BorderLayout());
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(scroll, BorderLayout.CENTER);
+        screen.add(bottom, BorderLayout.SOUTH);
+        return screen;
     }
 
     // =================================================================
-    // TAB 6 - help for new staff
+    // SCREEN - active sessions
     // =================================================================
-    private JPanel buildHelpPanel() {
+    private JPanel buildSessionsScreen() {
+        txtSessionInfo.setEditable(false);
+        txtSessionInfo.setFont(Theme.BODY);
+        txtSessionInfo.setBackground(Theme.CARD);
+        txtSessionInfo.setBorder(Theme.titledCard("This Session"));
+        txtSessionInfo.setRows(6);
+
+        JScrollPane scroll = new JScrollPane(tblSessions);
+        scroll.setBorder(Theme.titledCard("All Active Sessions"));
+        scroll.getViewport().setBackground(Theme.CARD);
+
+        JPanel bottom = Theme.canvas(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        bottom.add(btnSessionRefresh);
+        bottom.add(btnEndAllSessions);
+
+        JPanel screen = Theme.canvas(new BorderLayout(0, 14));
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(txtSessionInfo, BorderLayout.NORTH);
+        screen.add(scroll,         BorderLayout.CENTER);
+        screen.add(bottom,         BorderLayout.SOUTH);
+        return screen;
+    }
+
+    // =================================================================
+    // SCREEN - help
+    // =================================================================
+    private JPanel buildHelpScreen() {
         JTextArea help = new JTextArea(
             "SUNRISE DENTAL CLINIC - SYSTEM USER GUIDE\n"
           + "=========================================\n\n"
           + "KEYBOARD SHORTCUTS\n"
-          + "   Alt+S  Save appointment      Alt+C  Clear form\n"
-          + "   Alt+R  Search                Alt+B  Calculate bill\n"
-          + "   Alt+F  Refresh list          Alt+G  Generate reminders\n"
-          + "   Alt+L  Logout                F5     Refresh current tab\n"
+          + "   Alt+S  Save appointment      Alt+U  Update appointment\n"
+          + "   Alt+C  Clear form            Alt+R  Search\n"
+          + "   Alt+B  Calculate bill        Alt+F  Refresh list\n"
+          + "   Alt+E  Edit selected         Alt+D  Delete selected\n"
+          + "   Alt+G  Generate reminders    Alt+L  Sign out\n"
           + "   Enter  Submits the form you are currently in\n\n"
-          + "1. LOGGING IN\n"
-          + "   Enter the username and password issued to you by the clinic\n"
-          + "   administrator. Only authorised staff accounts can open the\n"
-          + "   system.\n\n"
-          + "2. REGISTERING A NEW APPOINTMENT\n"
-          + "   a. Open the 'Register Appointment' tab.\n"
-          + "   b. Appointment No: APT followed by four digits (APT1001).\n"
-          + "      Each number must be unique.\n"
-          + "   c. Patient Name: letters and spaces only.\n"
-          + "   d. Address: optional but recommended.\n"
-          + "   e. Contact No: exactly ten digits starting with 0.\n"
-          + "   f. Dentist and Treatment Type: choose from the dropdowns.\n"
-          + "   g. Date: yyyy-MM-dd. Use the Today or Tomorrow buttons to\n"
-          + "      fill it in without typing.\n"
-          + "   h. Time: HH:mm on a 24-hour clock, between 08:00 and 20:00.\n"
-          + "   i. Click 'Save Appointment' or press Alt+S.\n\n"
-          + "   If something is wrong, the message appears in red beside the\n"
-          + "   field that needs fixing, and the field is highlighted. You do\n"
-          + "   not have to dismiss a dialog to see which field it was.\n\n"
-          + "   The system refuses to save if the chosen dentist already has\n"
-          + "   an appointment at that exact date and time. This prevents the\n"
-          + "   double bookings that occurred with the old paper diary.\n\n"
-          + "3. FINDING AN APPOINTMENT\n"
-          + "   Open 'Search & Bill', type the appointment number and press\n"
-          + "   Enter. Alternatively open 'All Appointments' and double click\n"
-          + "   any row, which opens that record in the billing tab for you.\n\n"
-          + "4. PRINTING A PATIENT BILL\n"
-          + "   After searching, enter the consultation fee and click\n"
-          + "   'Calculate Bill'. The receipt shows the treatment cost, the\n"
-          + "   consultation fee and the total payable in rupees.\n\n"
-          + "5. VIEWING ALL APPOINTMENTS\n"
-          + "   The 'All Appointments' tab loads automatically in the\n"
-          + "   background. Click any column heading to sort by that column.\n\n"
-          + "6. DAILY SUMMARY\n"
-          + "   Shows how many appointments each dentist has on each day and\n"
-          + "   the treatment revenue expected. Useful for spotting a dentist\n"
-          + "   who is over-booked.\n\n"
-          + "7. PATIENT REMINDERS\n"
-          + "   Generates a reminder message for every patient booked for\n"
-          + "   tomorrow and writes them to a dispatch file.\n\n"
-          + "8. LOGGING OUT AND CLOSING\n"
-          + "   'Logout' ends your session and returns to the login screen,\n"
-          + "   leaving the system running for the next member of staff.\n"
-          + "   Closing the window shuts the system down completely.\n\n"
+          + "1. SIGNING IN\n"
+          + "   Enter the username and password issued by the clinic\n"
+          + "   administrator. Tick 'Keep me signed in on this computer' only\n"
+          + "   on a machine you personally control: it stores a session token\n"
+          + "   so the system reopens without asking for your password.\n\n"
+          + "2. SESSIONS\n"
+          + "   Each sign-in creates a session recorded in the database. The\n"
+          + "   header shows how long your session has left. After 30 minutes\n"
+          + "   with no activity you are signed out automatically, so an\n"
+          + "   unattended reception desk cannot be used by a passer-by.\n\n"
+          + "   'Active Sessions' lists every signed-in account. 'Sign Out\n"
+          + "   Everywhere' closes your sessions on all machines - use it if\n"
+          + "   you have left yourself signed in elsewhere.\n\n"
+          + "3. THE DASHBOARD\n"
+          + "   Opens on sign-in and shows how many appointments there are\n"
+          + "   today and tomorrow, the total on record, and the revenue\n"
+          + "   expected today, with today's schedule underneath.\n\n"
+          + "4. REGISTERING AN APPOINTMENT\n"
+          + "   a. Appointment No: APT followed by four digits. The next free\n"
+          + "      number is filled in for you.\n"
+          + "   b. Patient Name: letters and spaces only.\n"
+          + "   c. Contact No: exactly ten digits starting with 0.\n"
+          + "   d. Dentist and Treatment: choose from the dropdowns.\n"
+          + "   e. Date: use Today or Tomorrow, or type yyyy-MM-dd.\n"
+          + "   f. Time: HH:mm, between 08:00 and 20:00.\n"
+          + "   g. Click Save Appointment.\n\n"
+          + "   Problems appear in red beside the field concerned and the\n"
+          + "   field is highlighted, so you do not have to dismiss a dialog\n"
+          + "   to find out which field was wrong.\n\n"
+          + "   The system refuses to save if the dentist already has an\n"
+          + "   appointment at that exact date and time. This prevents the\n"
+          + "   double bookings that happened with the paper diary.\n\n"
+          + "5. CHANGING OR CANCELLING AN APPOINTMENT\n"
+          + "   Open 'All Appointments', select the row, then:\n"
+          + "     Edit Selected   - loads it into the register form. Change\n"
+          + "                       what is needed and click Update.\n"
+          + "     Delete Selected - removes it permanently after confirming.\n\n"
+          + "6. FINDING AND BILLING\n"
+          + "   Search & Bill: type the number and press Enter. Or open All\n"
+          + "   Appointments and double click any row. Then enter the\n"
+          + "   consultation fee and click Calculate Bill. 'Save Receipt'\n"
+          + "   writes it to a text file you can print.\n\n"
+          + "7. DAILY SUMMARY\n"
+          + "   Appointments and expected revenue per dentist per day. Useful\n"
+          + "   for spotting a dentist who is over-booked.\n\n"
+          + "8. PATIENT REMINDERS\n"
+          + "   Builds a reminder for every patient booked tomorrow and\n"
+          + "   writes them to a dispatch file for the SMS provider.\n\n"
           + "TROUBLESHOOTING\n"
           + "   'Cannot connect to database' - ask the administrator to check\n"
-          + "   that the WAMP server is running (tray icon must be green).\n\n"
-          + "   'Double booking' - that dentist is already busy at that time.\n"
-          + "   Choose a different time or a different dentist.\n");
+          + "   that WampServer is running (tray icon must be green).\n\n"
+          + "   'Double booking' - that dentist is busy at that time. Choose\n"
+          + "   a different time or a different dentist.\n\n"
+          + "   Signed out unexpectedly - your session timed out after 30\n"
+          + "   minutes of inactivity. Sign in again.\n");
         help.setEditable(false);
-        help.setFont(Theme.LABEL);
+        help.setFont(Theme.BODY);
+        help.setBackground(Theme.CARD);
         help.setCaretPosition(0);
 
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(new JScrollPane(help), BorderLayout.CENTER);
-        return panel;
+        JScrollPane scroll = new JScrollPane(help);
+        scroll.setBorder(Theme.hairline());
+
+        JPanel screen = Theme.canvas(new BorderLayout());
+        screen.setBorder(Theme.pad(20, 26, 20, 26));
+        screen.add(scroll, BorderLayout.CENTER);
+        return screen;
     }
 
     // =================================================================
     // STATUS BAR
     // =================================================================
     private JPanel buildStatusBar() {
-        lblStatus.setFont(Theme.LABEL);
-        lblUser.setFont(Theme.LABEL);
-        lblClock.setFont(Theme.LABEL);
+        lblStatus.setFont(Theme.BODY);
+        lblStatus.setForeground(Theme.TEXT);
+        lblClock.setFont(Theme.BODY);
+        lblClock.setForeground(Theme.TEXT_MUTED);
         lblClock.setHorizontalAlignment(SwingConstants.RIGHT);
 
-        JPanel labels = new JPanel(new GridLayout(1, 3));
-        labels.add(lblStatus);
-        labels.add(lblUser);
-        labels.add(lblClock);
-
         JPanel bar = new JPanel(new BorderLayout());
-        bar.setBorder(BorderFactory.createEtchedBorder());
-        bar.add(labels,    BorderLayout.CENTER);
-        bar.add(btnLogout, BorderLayout.EAST);
+        bar.setBackground(Theme.CARD);
+        bar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.BORDER),
+                Theme.pad(7, 26, 7, 26)));
+        bar.add(lblStatus, BorderLayout.WEST);
+        bar.add(lblClock,  BorderLayout.EAST);
         return bar;
     }
 
@@ -466,8 +692,6 @@ public class MainView extends JFrame {
     // KEYBOARD CONVENIENCE
     // =================================================================
     private void wireConvenienceKeys() {
-
-        // Enter in the search box does the same as clicking Search.
         txtSearchNo.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -477,7 +701,6 @@ public class MainView extends JFrame {
             }
         });
 
-        // Quick date fill.
         btnToday.addActionListener(e -> {
             txtDate.setText(LocalDate.now().toString());
             clearFieldError("date");
@@ -487,7 +710,8 @@ public class MainView extends JFrame {
             clearFieldError("date");
         });
 
-        // Typing in a field clears its error, so old messages do not linger.
+        // Typing in a field clears its own error, so stale messages do not
+        // linger next to a value the user has already corrected.
         for (Map.Entry<String, JComponent> entry : fields.entrySet()) {
             if (entry.getValue() instanceof JTextField) {
                 final String key = entry.getKey();
@@ -514,11 +738,24 @@ public class MainView extends JFrame {
     public String getTime()            { return txtTime.getText().trim(); }
     public String getSearchNo()        { return txtSearchNo.getText().trim(); }
     public String getConsultationFee() { return txtConsultationFee.getText().trim(); }
+    public String getFilterText()      { return txtFilter.getText().trim(); }
+    public String getReceiptText()     { return txtReceipt.getText(); }
 
-    public DefaultTableModel getTableModel()       { return tableModel; }
-    public DefaultTableModel getReportTableModel() { return reportModel; }
+    public DefaultTableModel getTableModel()        { return tableModel; }
+    public DefaultTableModel getReportTableModel()  { return reportModel; }
+    public DefaultTableModel getSessionTableModel() { return sessionModel; }
+    public DefaultTableModel getTodayTableModel()   { return todayModel; }
 
-    /** True when the register form has anything typed into it. */
+    /** The appointment number of the selected row, or null if none. */
+    public String getSelectedAppointmentNo() {
+        int row = tblAppointments.getSelectedRow();
+        if (row < 0) {
+            return null;
+        }
+        int modelRow = tblAppointments.convertRowIndexToModel(row);
+        return String.valueOf(tableModel.getValueAt(modelRow, 0));
+    }
+
     public boolean isRegisterFormDirty() {
         return !getAppointmentNo().isEmpty() || !getPatientName().isEmpty()
             || !getAddress().isEmpty()       || !getContactNo().isEmpty()
@@ -528,41 +765,33 @@ public class MainView extends JFrame {
     // =================================================================
     // INLINE VALIDATION FEEDBACK
     // =================================================================
-
-    /**
-     * Shows a red message beside one field and tints the field itself.
-     * Called by the controller instead of opening an error dialog.
-     */
-    public void showFieldError(String fieldKey, String message) {
-        JLabel label = errorLabels.get(fieldKey);
+    public void showFieldError(String key, String message) {
+        JLabel label = errorLabels.get(key);
         if (label != null) {
             label.setText(message);
             label.setForeground(Theme.ERROR);
-            label.setFont(Theme.SMALL);
         }
-        JComponent field = fields.get(fieldKey);
+        JComponent field = fields.get(key);
         if (field instanceof JTextField) {
-            field.setBackground(Theme.FIELD_ERROR);
-            field.setBorder(Theme.FIELD_BORDER_ERROR);
+            field.setBackground(Theme.ERROR_BG);
+            field.setBorder(Theme.FIELD_ERROR);
             field.requestFocus();
         }
     }
 
-    /** Restores one field to its normal appearance. */
-    public void clearFieldError(String fieldKey) {
-        JLabel label = errorLabels.get(fieldKey);
-        if (label != null && label.getForeground().equals(Theme.ERROR)) {
+    public void clearFieldError(String key) {
+        JLabel label = errorLabels.get(key);
+        if (label != null && Theme.ERROR.equals(label.getForeground())) {
             label.setText("");
             label.setForeground(Theme.TEXT_MUTED);
         }
-        JComponent field = fields.get(fieldKey);
+        JComponent field = fields.get(key);
         if (field instanceof JTextField) {
             field.setBackground(Theme.FIELD_OK);
-            field.setBorder(Theme.FIELD_BORDER);
+            field.setBorder(Theme.FIELD);
         }
     }
 
-    /** Clears every field error before a fresh validation pass. */
     public void clearAllFieldErrors() {
         for (String key : errorLabels.keySet()) {
             clearFieldError(key);
@@ -579,11 +808,43 @@ public class MainView extends JFrame {
         }
     }
 
-    /** Pre-fills the next free appointment number so staff need not invent one. */
     public void suggestAppointmentNo(String number) {
         if (txtAppointmentNo.getText().trim().isEmpty()) {
             txtAppointmentNo.setText(number);
         }
+    }
+
+    /** Loads an appointment into the register form for editing. */
+    public void loadForEdit(String no, String name, String address, String contact,
+                            String dentist, String treatment, String date, String time) {
+        clearAllFieldErrors();
+        txtAppointmentNo.setText(no);
+        txtAppointmentNo.setEditable(false);    // the key must not change
+        txtPatientName.setText(name);
+        txtAddress.setText(address == null ? "" : address);
+        txtContactNo.setText(contact);
+        cmbDentist.setSelectedItem(dentist);
+        cmbTreatment.setSelectedItem(treatment);
+        txtDate.setText(date);
+        txtTime.setText(time);
+
+        lblFormMode.setText("Editing " + no + " - change what you need, then click Update");
+        btnSave.setVisible(false);
+        btnUpdate.setVisible(true);
+        showScreen(SCREEN_REGISTER, "Register Appointment");
+        txtPatientName.requestFocus();
+    }
+
+    public boolean isEditing() {
+        return btnUpdate.isVisible();
+    }
+
+    public void setDashboardStats(String today, String tomorrow,
+                                  String total, String revenue) {
+        cardToday.setValue(today);
+        cardTomorrow.setValue(tomorrow);
+        cardTotal.setValue(total);
+        cardRevenue.setValue(revenue);
     }
 
     public void setDetails(String text) {
@@ -601,32 +862,35 @@ public class MainView extends JFrame {
         txtNotifications.setCaretPosition(0);
     }
 
-    /** Neutral status message. */
-    public void setStatus(String text) {
-        lblStatus.setForeground(Color.BLACK);
-        lblStatus.setText("  " + text);
+    public void setSessionInfo(String text) {
+        txtSessionInfo.setText(text);
+        txtSessionInfo.setCaretPosition(0);
     }
 
-    /** Green status, used to confirm something worked. */
+    public void setStatus(String text) {
+        lblStatus.setForeground(Theme.TEXT);
+        lblStatus.setText(text);
+    }
+
     public void setStatusSuccess(String text) {
         lblStatus.setForeground(Theme.SUCCESS);
-        lblStatus.setText("  " + text);
+        lblStatus.setText(text);
     }
 
-    /** Red status, used when something failed. */
     public void setStatusError(String text) {
         lblStatus.setForeground(Theme.ERROR);
-        lblStatus.setText("  " + text);
+        lblStatus.setText(text);
     }
 
-    public void setClock(String text)        { lblClock.setText(text + "   "); }
-    public void setLoggedInUser(String name) { lblUser.setText("Logged in as: " + name); }
+    public void setClock(String text)        { lblClock.setText(text); }
+    public void setLoggedInUser(String name) { lblUser.setText(name); }
 
-    /**
-     * Shows a wait cursor while a background task runs, so the user can see
-     * that the system is working rather than wondering whether their click
-     * registered.
-     */
+    /** Session countdown in the header; amber when the time is short. */
+    public void setSessionCountdown(String text, boolean warning) {
+        lblSession.setText(text);
+        lblSession.setForeground(warning ? Theme.AMBER : Theme.TEXT_FADED);
+    }
+
     public void setBusy(boolean busy) {
         setCursor(Cursor.getPredefinedCursor(
                 busy ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR));
@@ -635,6 +899,7 @@ public class MainView extends JFrame {
     public void clearForm() {
         clearAllFieldErrors();
         txtAppointmentNo.setText("");
+        txtAppointmentNo.setEditable(true);
         txtPatientName.setText("");
         txtAddress.setText("");
         txtContactNo.setText("");
@@ -644,10 +909,13 @@ public class MainView extends JFrame {
         if (cmbTreatment.getItemCount() > 0) {
             cmbTreatment.setSelectedIndex(0);
         }
+        lblFormMode.setText(" ");
+        btnSave.setVisible(true);
+        btnUpdate.setVisible(false);
         txtAppointmentNo.requestFocus();
     }
 
-    /** Asks before discarding typed data. */
+    /** Asks before discarding typed data; silent when the form is empty. */
     public boolean confirmClear() {
         if (!isRegisterFormDirty()) {
             return true;
@@ -656,6 +924,21 @@ public class MainView extends JFrame {
                 "Clear the form? Anything you have typed will be lost.",
                 "Confirm Clear", JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    public boolean confirmDelete(String appointmentNo) {
+        return JOptionPane.showConfirmDialog(this,
+                "Permanently delete appointment " + appointmentNo + "?\n\n"
+              + "This cannot be undone.",
+                "Confirm Delete", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE) == JOptionPane.YES_OPTION;
+    }
+
+    public boolean confirmExit() {
+        return JOptionPane.showConfirmDialog(this,
+                "Close the Appointment Management System?",
+                "Confirm Exit", JOptionPane.YES_NO_OPTION)
+                == JOptionPane.YES_OPTION;
     }
 
     public void showError(String msg) {
@@ -667,37 +950,51 @@ public class MainView extends JFrame {
                 JOptionPane.INFORMATION_MESSAGE);
     }
 
-    public boolean confirmExit() {
-        return JOptionPane.showConfirmDialog(this,
-                "Close the Appointment Management System?",
-                "Confirm Exit", JOptionPane.YES_NO_OPTION)
-                == JOptionPane.YES_OPTION;
-    }
-
-    /** Moves the user to the registration tab and focuses the first field. */
-    public void focusRegisterTab() {
-        tabs.setSelectedIndex(0);
-        txtAppointmentNo.requestFocus();
+    public void showWarning(String msg) {
+        JOptionPane.showMessageDialog(this, msg, "Session",
+                JOptionPane.WARNING_MESSAGE);
     }
 
     // =================================================================
-    // OBSERVER PATTERN
+    // OBSERVER PATTERN - the controller subscribes to these events
     // =================================================================
-    public void addSaveListener(ActionListener l)    { btnSave.addActionListener(l); }
-    public void addClearListener(ActionListener l)   { btnClear.addActionListener(l); }
-    public void addBillListener(ActionListener l)    { btnBill.addActionListener(l); }
-    public void addRefreshListener(ActionListener l) { btnRefresh.addActionListener(l); }
-    public void addReportRefreshListener(ActionListener l) { btnReportRefresh.addActionListener(l); }
-    public void addRemindersListener(ActionListener l) { btnSendReminders.addActionListener(l); }
-    public void addLogoutListener(ActionListener l)  { btnLogout.addActionListener(l); }
+    public void addSaveListener(ActionListener l)          { btnSave.addActionListener(l); }
+    public void addUpdateListener(ActionListener l)         { btnUpdate.addActionListener(l); }
+    public void addClearListener(ActionListener l)          { btnClear.addActionListener(l); }
+    public void addBillListener(ActionListener l)           { btnBill.addActionListener(l); }
+    public void addSaveReceiptListener(ActionListener l)    { btnSaveReceipt.addActionListener(l); }
+    public void addRefreshListener(ActionListener l)        { btnRefresh.addActionListener(l); }
+    public void addEditListener(ActionListener l)           { btnEdit.addActionListener(l); }
+    public void addDeleteListener(ActionListener l)         { btnDelete.addActionListener(l); }
+    public void addReportRefreshListener(ActionListener l)  { btnReportRefresh.addActionListener(l); }
+    public void addRemindersListener(ActionListener l)      { btnSendReminders.addActionListener(l); }
+    public void addLogoutListener(ActionListener l)         { btnLogout.addActionListener(l); }
+    public void addSessionRefreshListener(ActionListener l) { btnSessionRefresh.addActionListener(l); }
+    public void addEndAllSessionsListener(ActionListener l) { btnEndAllSessions.addActionListener(l); }
 
-    /** Search is also triggered by Enter and by double clicking a table row. */
     public void addSearchListener(ActionListener l) {
         this.searchListener = l;
         btnSearch.addActionListener(l);
     }
 
+    /** Fires as the user types in the appointment filter box. */
+    public void addFilterListener(ActionListener l) {
+        txtFilter.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyReleased(KeyEvent e) {
+                l.actionPerformed(new ActionEvent(this, 0, "filter"));
+            }
+        });
+    }
+
     public void addWindowCloseListener(WindowAdapter adapter) {
         addWindowListener(adapter);
+    }
+
+    /** Any mouse or key event anywhere refreshes the session idle timer. */
+    public void addGlobalActivityListener(ActionListener l) {
+        java.awt.Toolkit.getDefaultToolkit().addAWTEventListener(
+            event -> l.actionPerformed(new ActionEvent(this, 0, "activity")),
+            java.awt.AWTEvent.MOUSE_EVENT_MASK | java.awt.AWTEvent.KEY_EVENT_MASK);
     }
 }

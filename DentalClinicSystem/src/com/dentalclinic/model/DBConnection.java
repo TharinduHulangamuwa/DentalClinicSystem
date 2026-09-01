@@ -7,44 +7,38 @@ import java.sql.SQLException;
 /**
  * SINGLETON PATTERN.
  *
- * Guarantees that the entire application shares exactly one JDBC connection
- * to the MySQL database running under WAMP.
+ * Guarantees the whole application shares exactly one JDBC connection to the
+ * MySQL database running under WampServer.
  *
- * Why this pattern was chosen:
- *   - Opening a TCP connection to MySQL is expensive (tens of milliseconds).
- *     Doing it on every button click would make the UI feel sluggish.
- *   - Connection settings exist in exactly one place, so moving the database
- *     to another machine is a one-line change.
- *   - The private constructor makes it impossible for any other class to
- *     create a second instance by mistake.
+ * Why this pattern:
+ *   - opening a TCP connection to MySQL costs tens of milliseconds, so doing
+ *     it on every button click would make the interface feel sluggish
+ *   - connection settings exist in one place, so moving the database to
+ *     another machine is a one-line change
+ *   - the private constructor makes a second instance impossible to create
  *
  * @author [Your Name]
  */
-public class DBConnection {
+public final class DBConnection {
 
-    // --- Connection settings. Change only these three lines if WAMP differs. ---
+    // ---- change only these three lines if your WAMP differs ----
     private static final String URL  = "jdbc:mysql://localhost:3306/dental_clinic"
                                      + "?useSSL=false&serverTimezone=UTC";
     private static final String USER = "root";
-    private static final String PASS = "";      // WAMP default root password is blank
+    private static final String PASS = "";      // WAMP default is blank
 
-    /** The single shared instance. */
     private static Connection connection;
 
-    /** Private constructor blocks external instantiation. */
     private DBConnection() { }
 
-    /**
-     * Returns the shared connection, creating it on first use.
-     * Also recreates it if it was closed, so the app recovers gracefully.
-     */
+    /** Returns the shared connection, opening it on first use. */
     public static Connection getConnection() throws SQLException {
         if (connection == null || connection.isClosed()) {
             try {
                 Class.forName("com.mysql.cj.jdbc.Driver");
             } catch (ClassNotFoundException e) {
-                throw new SQLException(
-                    "MySQL JDBC driver not found. Add mysql-connector-j to Libraries.", e);
+                throw new SQLException("MySQL JDBC driver not found. "
+                        + "Add mysql-connector-j to the project Libraries.", e);
             }
             connection = DriverManager.getConnection(URL, USER, PASS);
         }
@@ -56,18 +50,25 @@ public class DBConnection {
         try {
             if (connection != null && !connection.isClosed()) {
                 connection.close();
-                System.out.println("Database connection closed.");
+                System.out.println("[DB] connection closed");
             }
         } catch (SQLException e) {
-            System.err.println("Error closing connection: " + e.getMessage());
+            System.err.println("[DB] error closing connection: " + e.getMessage());
         }
     }
 
-    /** Simple health check used by the startup self-test. */
+    /**
+     * Health check used by the startup self-test.
+     * Logs the real cause, because a silent false here is very hard to debug.
+     */
     public static boolean isReachable() {
         try {
             return getConnection() != null && !getConnection().isClosed();
         } catch (SQLException e) {
+            System.err.println("=== DATABASE CONNECTION FAILED ===");
+            System.err.println("Message  : " + e.getMessage());
+            System.err.println("SQLState : " + e.getSQLState());
+            System.err.println("Code     : " + e.getErrorCode());
             return false;
         }
     }

@@ -1,111 +1,214 @@
 package com.dentalclinic.view;
 
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
+import java.awt.LayoutManager;
+import java.util.Arrays;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.border.Border;
 
 /**
- * Central place for every colour, font and border used by the interface.
+ * Every colour, font and border used by the interface, defined once.
  *
- * DESIGN DECISION: before this class existed, colours and fonts were written
- * as literals wherever they were needed. That made the interface visually
- * inconsistent - the same shade of blue appeared as three slightly different
- * values - and meant a change to the clinic's branding required edits in
- * every view class.
+ * DESIGN DECISION: writing colours and fonts as literals wherever they are
+ * needed makes an interface subtly inconsistent - the same blue ends up as
+ * three slightly different values - and means a branding change requires
+ * edits in every view class. Defining them here gives the application one
+ * visual identity and makes restyling a single-file change.
  *
- * Defining them once here gives the application a single visual identity and
- * makes restyling a one-file change. The idea is the same one behind a CSS
- * stylesheet, applied to Swing.
+ * The idea is the same one behind a CSS stylesheet, applied to Swing.
  *
  * @author [Your Name]
  */
-public class Theme {
+public final class Theme {
 
     private Theme() { }
 
-    // ---------------- colours ----------------
-    /** Clinic brand colour, used for headers. */
-    public static final Color BRAND        = new Color(23, 58, 95);
-    public static final Color BRAND_LIGHT  = new Color(232, 240, 250);
+    // ================= palette =================
 
-    /** Feedback colours. Chosen for contrast against white backgrounds. */
-    public static final Color ERROR        = new Color(178, 34, 34);
-    public static final Color SUCCESS      = new Color(21, 115, 71);
-    public static final Color WARNING      = new Color(176, 106, 0);
+    /** Clinical navy, used for the sidebar and header. */
+    public static final Color NAVY       = new Color(19, 47, 76);
+    public static final Color NAVY_LIGHT = new Color(31, 68, 105);
+    public static final Color NAVY_HOVER = new Color(42, 88, 133);
 
-    /** Field states. */
-    public static final Color FIELD_OK     = Color.WHITE;
-    public static final Color FIELD_ERROR  = new Color(255, 235, 235);
+    /** Teal accent for the selected nav item and primary actions. */
+    public static final Color ACCENT      = new Color(0, 130, 180);
+    public static final Color ACCENT_DARK = new Color(0, 105, 148);
 
-    /** Table striping, kept subtle so it aids scanning without distracting. */
-    public static final Color ROW_STRIPE   = new Color(245, 248, 252);
+    // surfaces
+    public static final Color CANVAS     = new Color(243, 246, 250);
+    public static final Color CARD       = Color.WHITE;
+    public static final Color BORDER     = new Color(214, 221, 231);
+    public static final Color ROW_STRIPE = new Color(247, 250, 253);
 
-    public static final Color TEXT_MUTED   = new Color(105, 105, 105);
+    // feedback
+    public static final Color ERROR    = new Color(183, 28, 28);
+    public static final Color ERROR_BG = new Color(255, 238, 238);
+    public static final Color SUCCESS  = new Color(21, 115, 71);
+    public static final Color WARNING  = new Color(176, 106, 0);
+    public static final Color AMBER    = new Color(255, 196, 87);
 
-    // ---------------- fonts ----------------
-    public static final Font TITLE   = new Font("SansSerif", Font.BOLD,  20);
-    public static final Font HEADING = new Font("SansSerif", Font.BOLD,  14);
-    public static final Font LABEL   = new Font("SansSerif", Font.PLAIN, 13);
-    public static final Font SMALL   = new Font("SansSerif", Font.PLAIN, 11);
-    public static final Font MONO    = new Font("Monospaced", Font.PLAIN, 13);
+    // text
+    public static final Color TEXT         = new Color(28, 35, 45);
+    public static final Color TEXT_MUTED   = new Color(112, 122, 136);
+    public static final Color TEXT_ON_DARK = new Color(232, 238, 245);
+    public static final Color TEXT_FADED   = new Color(150, 175, 200);
 
-    // ---------------- borders ----------------
-    public static final Border FIELD_BORDER = BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(190, 195, 205)),
-            BorderFactory.createEmptyBorder(4, 6, 4, 6));
+    public static final Color FIELD_OK = Color.WHITE;
 
-    public static final Border FIELD_BORDER_ERROR = BorderFactory.createCompoundBorder(
+    // ================= fonts =================
+
+    /**
+     * Picks the first font that is actually installed, so the interface looks
+     * the same on Windows, macOS and Linux instead of falling back to a
+     * default serif face.
+     */
+    private static final String FAMILY = pickFamily(
+            "Segoe UI", "Inter", "Helvetica Neue", "DejaVu Sans", "SansSerif");
+
+    private static String pickFamily(String... candidates) {
+        java.util.List<String> installed = Arrays.asList(
+                GraphicsEnvironment.getLocalGraphicsEnvironment()
+                                   .getAvailableFontFamilyNames());
+        for (String c : candidates) {
+            if (installed.contains(c)) {
+                return c;
+            }
+        }
+        return "SansSerif";
+    }
+
+    public static final Font BRAND   = new Font(FAMILY, Font.BOLD,  19);
+    public static final Font TITLE   = new Font(FAMILY, Font.BOLD,  17);
+    public static final Font STAT    = new Font(FAMILY, Font.BOLD,  28);
+    public static final Font HEADING = new Font(FAMILY, Font.BOLD,  13);
+    public static final Font BODY    = new Font(FAMILY, Font.PLAIN, 13);
+    public static final Font SMALL   = new Font(FAMILY, Font.PLAIN, 11);
+    public static final Font NAV     = new Font(FAMILY, Font.PLAIN, 14);
+    public static final Font MONO    = new Font(pickFamily(
+            "Consolas", "DejaVu Sans Mono", "Monospaced"), Font.PLAIN, 13);
+
+    // ================= borders =================
+
+    public static final Border FIELD = BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(BORDER),
+            BorderFactory.createEmptyBorder(6, 8, 6, 8));
+
+    public static final Border FIELD_ERROR = BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(ERROR),
-            BorderFactory.createEmptyBorder(4, 6, 4, 6));
+            BorderFactory.createEmptyBorder(6, 8, 6, 8));
 
-    /** Standard padding inside a panel. */
     public static Border pad(int top, int left, int bottom, int right) {
         return BorderFactory.createEmptyBorder(top, left, bottom, right);
     }
 
-    // ---------------- component helpers ----------------
+    public static Border hairline() {
+        return BorderFactory.createLineBorder(BORDER);
+    }
 
-    /** A form label, right aligned so labels sit close to their fields. */
+    /** A titled white card, used to group related controls. */
+    public static Border titledCard(String title) {
+        return BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder(
+                        BorderFactory.createLineBorder(BORDER), " " + title + " ",
+                        javax.swing.border.TitledBorder.LEFT,
+                        javax.swing.border.TitledBorder.TOP, HEADING, NAVY),
+                BorderFactory.createEmptyBorder(12, 16, 14, 16));
+    }
+
+    // ================= components =================
+
     public static JLabel formLabel(String text) {
-        JLabel label = new JLabel(text, JLabel.RIGHT);
-        label.setFont(LABEL);
-        return label;
+        JLabel l = new JLabel(text, JLabel.RIGHT);
+        l.setFont(BODY);
+        l.setForeground(TEXT);
+        return l;
     }
 
-    /** Small grey helper text shown beside a field. */
     public static JLabel hint(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(SMALL);
-        label.setForeground(TEXT_MUTED);
-        return label;
+        JLabel l = new JLabel(text);
+        l.setFont(SMALL);
+        l.setForeground(TEXT_MUTED);
+        return l;
     }
 
-    /**
-     * A primary action button: the one the user is most likely to press.
-     * Mnemonic underlines the given letter for keyboard access.
-     */
-    public static JButton primaryButton(String text, char mnemonic, String tooltip) {
-        JButton button = new JButton(text);
-        button.setFont(HEADING);
-        button.setBackground(BRAND);
-        button.setForeground(Color.WHITE);
-        button.setFocusPainted(false);
-        button.setOpaque(true);
-        button.setBorder(BorderFactory.createEmptyBorder(8, 18, 8, 18));
-        button.setMnemonic(mnemonic);
-        button.setToolTipText(tooltip);
-        return button;
+    public static JLabel title(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(TITLE);
+        l.setForeground(NAVY);
+        return l;
     }
 
-    /** A secondary button for supporting actions. */
-    public static JButton button(String text, char mnemonic, String tooltip) {
-        JButton button = new JButton(text);
-        button.setFont(LABEL);
-        button.setMnemonic(mnemonic);
-        button.setToolTipText(tooltip);
-        return button;
+    /** Solid accent button for the main action on a screen. */
+    public static JButton primary(String text, char mnemonic, String tip) {
+        JButton b = base(text, mnemonic, tip);
+        b.setFont(HEADING);
+        b.setBackground(ACCENT);
+        b.setForeground(Color.WHITE);
+        b.setBorderPainted(false);
+        b.setBorder(BorderFactory.createEmptyBorder(10, 24, 10, 24));
+        return b;
+    }
+
+    /** Outlined button for supporting actions. */
+    public static JButton secondary(String text, char mnemonic, String tip) {
+        JButton b = base(text, mnemonic, tip);
+        b.setFont(BODY);
+        b.setForeground(NAVY);
+        b.setBackground(Color.WHITE);
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(BORDER),
+                BorderFactory.createEmptyBorder(9, 20, 9, 20)));
+        return b;
+    }
+
+    /** Outlined button in the error colour, for destructive actions. */
+    public static JButton danger(String text, char mnemonic, String tip) {
+        JButton b = base(text, mnemonic, tip);
+        b.setFont(BODY);
+        b.setForeground(ERROR);
+        b.setBackground(Color.WHITE);
+        b.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(ERROR),
+                BorderFactory.createEmptyBorder(9, 20, 9, 20)));
+        return b;
+    }
+
+    /** Small flat button for the dark header. */
+    public static JButton onDark(String text, char mnemonic, String tip) {
+        JButton b = base(text, mnemonic, tip);
+        b.setFont(SMALL);
+        b.setForeground(TEXT_ON_DARK);
+        b.setBackground(NAVY_LIGHT);
+        b.setBorderPainted(false);
+        b.setBorder(BorderFactory.createEmptyBorder(7, 14, 7, 14));
+        return b;
+    }
+
+    private static JButton base(String text, char mnemonic, String tip) {
+        JButton b = new JButton(text);
+        b.setFocusPainted(false);
+        b.setOpaque(true);
+        b.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        b.setMnemonic(mnemonic);
+        b.setToolTipText(tip);
+        return b;
+    }
+
+    public static JPanel canvas(LayoutManager layout) {
+        JPanel p = new JPanel(layout);
+        p.setBackground(CANVAS);
+        return p;
+    }
+
+    public static JPanel white(LayoutManager layout) {
+        JPanel p = new JPanel(layout);
+        p.setBackground(CARD);
+        return p;
     }
 }

@@ -1,20 +1,22 @@
 package com.dentalclinic.view;
 
 import java.awt.Component;
+import java.awt.Dimension;
 import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellRenderer;
 
 /**
- * A JTable configured once for readability, so the two report tables do not
- * repeat the same setup code.
+ * A JTable configured once for readability, so every table in the
+ * application looks the same without repeating the setup.
  *
- * USABILITY REASONING: alternating row shading lets the eye track a single
- * record across seven columns without losing its place. Tall rows and a bold
- * header give the table visual structure. Both are small changes that make a
- * dense table noticeably easier to read, which matters because the
- * receptionist scans this list many times a day.
+ * USABILITY REASONING: alternating row shading lets the eye track one record
+ * across seven columns without losing its place. Taller rows and a bold
+ * header give the table structure. Both are small changes that make a dense
+ * table noticeably easier to read, which matters because the receptionist
+ * scans these lists many times a day.
  *
  * @author [Your Name]
  */
@@ -23,25 +25,29 @@ public class StripedTable extends JTable {
     public StripedTable(DefaultTableModel model) {
         super(model);
 
-        setRowHeight(26);
+        setRowHeight(30);
         setShowVerticalLines(false);
-        setGridColor(Theme.ROW_STRIPE);
-        setFont(Theme.LABEL);
+        setShowHorizontalLines(false);
+        setIntercellSpacing(new Dimension(0, 0));
+        setFont(Theme.BODY);
+        setForeground(Theme.TEXT);
+        setBackground(Theme.CARD);
         setAutoCreateRowSorter(true);
-        setSelectionBackground(Theme.BRAND_LIGHT);
-        setSelectionForeground(java.awt.Color.BLACK);
+        setSelectionBackground(new java.awt.Color(213, 232, 245));
+        setSelectionForeground(Theme.TEXT);
 
         JTableHeader header = getTableHeader();
         header.setFont(Theme.HEADING);
+        header.setBackground(Theme.CANVAS);
+        header.setForeground(Theme.NAVY);
+        header.setPreferredSize(new Dimension(0, 34));
         header.setReorderingAllowed(false);
     }
 
     /** Paints every second row in a pale tint. */
     @Override
-    public Component prepareRenderer(javax.swing.table.TableCellRenderer renderer,
-                                     int row, int column) {
+    public Component prepareRenderer(TableCellRenderer renderer, int row, int column) {
         Component c = super.prepareRenderer(renderer, row, column);
-
         if (!isRowSelected(row)) {
             c.setBackground(row % 2 == 0 ? getBackground() : Theme.ROW_STRIPE);
         }
@@ -50,9 +56,9 @@ public class StripedTable extends JTable {
 
     /** Right aligns a column, used for money and counts. */
     public void rightAlign(int columnIndex) {
-        DefaultTableCellRenderer renderer = new DefaultTableCellRenderer();
-        renderer.setHorizontalAlignment(DefaultTableCellRenderer.RIGHT);
-        getColumnModel().getColumn(columnIndex).setCellRenderer(renderer);
+        DefaultTableCellRenderer r = new DefaultTableCellRenderer();
+        r.setHorizontalAlignment(DefaultTableCellRenderer.RIGHT);
+        getColumnModel().getColumn(columnIndex).setCellRenderer(r);
     }
 
     /** Sets a preferred width for one column. */
