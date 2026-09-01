@@ -61,7 +61,12 @@ public class AppointmentController {
 
         // ---- Observer pattern: subscribe to every view event ----
         view.addSaveListener(e    -> saveAppointment());
-        view.addClearListener(e   -> view.clearForm());
+        view.addClearListener(e   -> {
+            if (view.confirmClear()) {
+                view.clearForm();
+                suggestNextAppointmentNo();
+            }
+        });
         view.addSearchListener(e  -> searchAppointment());
         view.addBillListener(e    -> generateBill());
         view.addRefreshListener(e -> loadAppointmentsInBackground());
@@ -80,6 +85,8 @@ public class AppointmentController {
         startClockThread();               // THREAD 1
         loadAppointmentsInBackground();   // THREAD 2
         loadDailyReport();
+        suggestNextAppointmentNo();
+        view.focusRegisterTab();
     }
 
     // =================================================================
@@ -133,7 +140,8 @@ public class AppointmentController {
     //   done()            runs on the EDT          -> Swing updates allowed
     // =================================================================
     private void loadAppointmentsInBackground() {
-        view.setStatus("Loading appointments from database...");
+        view.setStatus("Loading appointments...");
+        view.setBusy(true);
 
         new SwingWorker<List<Appointment>, Void>() {
 
@@ -165,10 +173,12 @@ public class AppointmentController {
                     view.setStatus(appointments.size() + " appointment(s) loaded.");
 
                 } catch (Exception ex) {
-                    view.setStatus("Load failed.");
+                    view.setStatusError("Could not load appointments.");
                     view.showError("Could not load appointments.\n\n"
                                  + ex.getMessage()
                                  + "\n\nCheck that WAMP is running.");
+                } finally {
+                    view.setBusy(false);
                 }
             }
         }.execute();
@@ -191,36 +201,43 @@ public class AppointmentController {
     // =================================================================
     private void saveAppointment() {
 
-        // ---- validation, checked in the order the user filled the form ----
+        // Version 1.2: every validation failure is reported beside the field
+        // that caused it instead of in a modal dialog. All fields are checked
+        // in one pass so the user sees every problem at once rather than
+        // fixing one, resubmitting, and discovering the next.
+        view.clearAllFieldErrors();
+
+        boolean valid = true;
+
         if (!Validator.isValidAppointmentNo(view.getAppointmentNo())) {
-            view.showError("Appointment number must be APT followed by exactly "
-                         + "four digits.\n\nExample: APT1001");
-            return;
+            view.showFieldError("appointmentNo", "Must be APT plus 4 digits");
+            valid = false;
         }
         if (!Validator.isValidName(view.getPatientName())) {
-            view.showError("Patient name is required and may contain only "
-                         + "letters, spaces, full stops and hyphens.");
-            return;
+            view.showFieldError("patientName", "Letters and spaces only");
+            valid = false;
         }
         if (!Validator.isValidContact(view.getContactNo())) {
-            view.showError("Contact number must be exactly ten digits "
-                         + "starting with 0.\n\nExample: 0771234567");
-            return;
+            view.showFieldError("contactNo", "10 digits starting with 0");
+            valid = false;
         }
         if (!Validator.isValidDate(view.getDate())) {
-            view.showError("Date must be in yyyy-MM-dd format.\n\nExample: 2026-06-15");
-            return;
-        }
-        if (!Validator.isNotPastDate(view.getDate())) {
-            view.showError("Appointments cannot be booked in the past.");
-            return;
+            view.showFieldError("date", "Use yyyy-MM-dd");
+            valid = false;
+        } else if (!Validator.isNotPastDate(view.getDate())) {
+            view.showFieldError("date", "Cannot book in the past");
+            valid = false;
         }
         if (!Validator.isValidTime(view.getTime())) {
-            view.showError("Time must be in HH:mm 24-hour format.\n\nExample: 14:30");
-            return;
+            view.showFieldError("time", "Use HH:mm, e.g. 14:30");
+            valid = false;
+        } else if (!Validator.isWithinClinicHours(view.getTime())) {
+            view.showFieldError("time", "Clinic open 08:00 to 20:00");
+            valid = false;
         }
-        if (!Validator.isWithinClinicHours(view.getTime())) {
-            view.showError("The clinic is open from 08:00 to 20:00 only.");
+
+        if (!valid) {
+            view.setStatusError("Please correct the highlighted fields.");
             return;
         }
 
@@ -235,17 +252,21 @@ public class AppointmentController {
                 view.getTime());
 
         try {
-            // ---- duplicate appointment number check ----
+            view.setBusy(true);
+
+            // duplicate appointment number
             if (dao.findByNo(appointment.getAppointmentNo()) != null) {
-                view.showError("Appointment number " + appointment.getAppointmentNo()
-                             + " is already in use.\n\nPlease choose another number.");
+                view.showFieldError("appointmentNo", "Already in use");
+                view.setStatusError("That appointment number already exists.");
                 return;
             }
 
-            // ---- double booking check (the scenario's stated problem) ----
+            // double booking, the problem stated in the scenario
             if (dao.slotTaken(appointment.getDentistName(),
                               appointment.getAppointmentDate(),
                               appointment.getAppointmentTime())) {
+                view.showFieldError("time", "Dentist already booked");
+                view.setStatusError("Double booking prevented.");
                 view.showError("DOUBLE BOOKING PREVENTED\n\n"
                              + appointment.getDentistName()
                              + " already has an appointment on "
@@ -256,23 +277,47 @@ public class AppointmentController {
             }
 
             if (dao.save(appointment)) {
-                view.showInfo("Appointment " + appointment.getAppointmentNo()
-                            + " saved successfully for "
-                            + appointment.getPatientName() + ".");
+                view.setStatusSuccess("Appointment " + appointment.getAppointmentNo()
+                        + " saved for " + appointment.getPatientName() + ".");
                 view.clearForm();
-                loadAppointmentsInBackground();   // refresh the report tab
+                suggestNextAppointmentNo();
+                loadAppointmentsInBackground();
+                loadDailyReport();
             }
 
         } catch (SQLIntegrityConstraintViolationException ex) {
-            // Safety net: the database constraint caught what the checks above
-            // missed, for example if another member of staff booked the same
-            // slot a fraction of a second earlier.
+            view.showFieldError("time", "Slot taken");
+            view.setStatusError("Double booking prevented by the database.");
             view.showError("DOUBLE BOOKING PREVENTED BY THE DATABASE\n\n"
-                         + "That slot was taken while you were filling the form.\n"
-                         + "Please choose a different time.");
+                         + "That slot was taken while you were filling the form.");
         } catch (Exception ex) {
+            view.setStatusError("Save failed.");
             view.showError("Could not save the appointment.\n\n" + ex.getMessage());
+        } finally {
+            view.setBusy(false);
         }
+    }
+
+    /**
+     * Looks up the next free appointment number and offers it to the user.
+     * Inventing a unique number by hand is error prone and slow; the system
+     * already knows what the next one should be.
+     */
+    private void suggestNextAppointmentNo() {
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return new AppointmentDAO().nextAppointmentNo();
+            }
+            @Override
+            protected void done() {
+                try {
+                    view.suggestAppointmentNo(get());
+                } catch (Exception ignored) {
+                    // a suggestion is a convenience; failing to make one is harmless
+                }
+            }
+        }.execute();
     }
 
     // =================================================================
@@ -280,7 +325,7 @@ public class AppointmentController {
     // =================================================================
     private void searchAppointment() {
         if (!Validator.isValidAppointmentNo(view.getSearchNo())) {
-            view.showError("Enter a valid appointment number.\n\nExample: APT1001");
+            view.setStatusError("Enter a valid number such as APT1001.");
             return;
         }
 
@@ -288,11 +333,10 @@ public class AppointmentController {
             currentAppointment = dao.findByNo(view.getSearchNo());
 
             if (currentAppointment == null) {
-                view.setDetails("");
+                view.setDetails("\n   No appointment found with number "
+                              + view.getSearchNo() + ".\n");
                 view.setReceipt("");
-                view.showError("No appointment found with number "
-                             + view.getSearchNo() + ".");
-                view.setStatus("Search returned no results.");
+                view.setStatusError("No record found for " + view.getSearchNo() + ".");
                 return;
             }
 
@@ -306,7 +350,7 @@ public class AppointmentController {
                 + "Date           : " + currentAppointment.getAppointmentDate() + "\n"
                 + "Time           : " + currentAppointment.getAppointmentTime());
 
-            view.setStatus("Record found: " + currentAppointment.getPatientName());
+            view.setStatusSuccess("Found: " + currentAppointment.getPatientName());
 
         } catch (Exception ex) {
             view.showError("Search failed.\n\n" + ex.getMessage());
@@ -318,11 +362,11 @@ public class AppointmentController {
     // =================================================================
     private void generateBill() {
         if (currentAppointment == null) {
-            view.showError("Search for an appointment first, then generate the bill.");
+            view.setStatusError("Search for an appointment first.");
             return;
         }
         if (!Validator.isValidFee(view.getConsultationFee())) {
-            view.showError("Consultation fee must be a number of zero or more.");
+            view.setStatusError("Consultation fee must be a number of zero or more.");
             return;
         }
 
@@ -332,7 +376,7 @@ public class AppointmentController {
 
             Bill bill = new Bill(currentAppointment, treatmentCost, fee);
             view.setReceipt(bill.generateReceipt());
-            view.setStatus(String.format("Bill generated. Total LKR %,.2f", bill.getTotal()));
+            view.setStatusSuccess(String.format("Bill generated. Total LKR %,.2f", bill.getTotal()));
 
         } catch (Exception ex) {
             view.showError("Could not generate the bill.\n\n" + ex.getMessage());
@@ -411,10 +455,10 @@ public class AppointmentController {
                     }
 
                     view.setNotifications(sb.toString());
-                    view.setStatus(messages.size() + " reminder(s) generated.");
+                    view.setStatusSuccess(messages.size() + " reminder(s) generated.");
 
                 } catch (Exception ex) {
-                    view.setStatus("Reminder generation failed.");
+                    view.setStatusError("Reminder generation failed.");
                     view.showError("Could not generate reminders.\n\n" + ex.getMessage());
                 }
             }

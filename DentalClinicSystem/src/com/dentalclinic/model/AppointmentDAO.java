@@ -72,6 +72,27 @@ public class AppointmentDAO {
     }
 
 
+    /**
+     * Works out the next free appointment number, so staff do not have to
+     * invent one and risk a clash. Reads the highest existing number and adds
+     * one, keeping the APT9999 format.
+     */
+    public String nextAppointmentNo() throws SQLException {
+        String sql = "SELECT MAX(CAST(SUBSTRING(appointment_no, 4) AS UNSIGNED)) "
+                   + "AS highest FROM appointments";
+        try (Statement st = DBConnection.getConnection().createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            if (rs.next()) {
+                int next = rs.getInt("highest") + 1;
+                if (next < 1001) {
+                    next = 1001;
+                }
+                return String.format("APT%04d", next);
+            }
+        }
+        return "APT1001";
+    }
+
     /** Appointments on one date, used by the reminder service. */
     public List<Appointment> findByDate(String date) throws SQLException {
         List<Appointment> list = new ArrayList<>();
