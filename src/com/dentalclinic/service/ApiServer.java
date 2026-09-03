@@ -62,6 +62,15 @@ public class ApiServer {
 
     public static final int PORT = 8081;
 
+    /**
+     * Serves the browser API console at /api/console.
+     *
+     * Set this to false before any production deployment. The console is a
+     * development and demonstration aid; a page that helps a visitor sign in
+     * and browse patient records is an attack surface a clinic does not need.
+     */
+    public static final boolean CONSOLE_ENABLED = true;
+
     private static final AppointmentDAO APPTS    = new AppointmentDAO();
     private static final UserDAO        USERS    = new UserDAO();
     private static final SessionDAO     SESSIONS = new SessionDAO();
@@ -89,6 +98,10 @@ public class ApiServer {
         // monitoring tool can confirm the service is alive.
         server.createContext("/api/health",       ApiServer::handleHealth);
 
+        if (CONSOLE_ENABLED) {
+            server.createContext("/api/console",  ApiServer::handleConsole);
+        }
+
         server.createContext("/api/login",        ApiServer::handleLogin);
         server.createContext("/api/logout",       ApiServer::handleLogout);
         server.createContext("/api/appointments", ApiServer::handleAppointments);
@@ -107,8 +120,13 @@ public class ApiServer {
         System.out.println(" Sunrise Dental Clinic - REST Web Service");
         System.out.println(" Listening on http://localhost:" + PORT + "/api/");
         System.out.println("");
-        System.out.println(" Check it in a browser:");
-        System.out.println("   http://localhost:" + PORT + "/api/health");
+        System.out.println(" Open in a browser:");
+        if (CONSOLE_ENABLED) {
+            System.out.println("   http://localhost:" + PORT + "/api/console"
+                    + "   <-- interactive API console");
+        }
+        System.out.println("   http://localhost:" + PORT + "/api/health"
+                + "    <-- plain status check");
         System.out.println("");
         System.out.println(" Now start the client: run Main.java");
         System.out.println(" Press Ctrl+C to stop this server");
@@ -123,6 +141,24 @@ public class ApiServer {
     // =================================================================
     // PUBLIC ENDPOINT
     // =================================================================
+
+    /**
+     * GET /api/console - the browser console page.
+     *
+     * Serves HTML rather than JSON. The page itself is unauthenticated, but
+     * it grants no access on its own: every request it makes goes through the
+     * same token check as any other client, so a visitor still needs valid
+     * credentials to see a single patient record.
+     */
+    private static void handleConsole(HttpExchange ex) throws IOException {
+        log(ex);
+        byte[] bytes = ApiConsole.html(PORT).getBytes(StandardCharsets.UTF_8);
+        ex.getResponseHeaders().add("Content-Type", "text/html; charset=UTF-8");
+        ex.sendResponseHeaders(200, bytes.length);
+        try (OutputStream out = ex.getResponseBody()) {
+            out.write(bytes);
+        }
+    }
 
     /**
      * GET /api/health - service status, no token required.
