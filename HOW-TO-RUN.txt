@@ -1,0 +1,130 @@
+================================================================
+ SUNRISE DENTAL CLINIC - HOW TO RUN
+ CIS6003 WRIT1  |  Solution Type 01
+================================================================
+
+THIS IS A TWO-PROCESS APPLICATION.
+You must start the SERVER first, then the CLIENT.
+
+----------------------------------------------------------------
+ONE-TIME SETUP
+----------------------------------------------------------------
+
+1. Start WampServer. The tray icon must be GREEN.
+
+2. Open phpMyAdmin (left-click the WAMP icon -> phpMyAdmin).
+   Log in as root with a blank password.
+   Click the SQL tab, paste ALL of sql/dental_clinic.sql, click Go.
+
+3. Download the MySQL driver:
+      https://dev.mysql.com/downloads/connector/j/
+      choose "Platform Independent", extract the ZIP,
+      copy mysql-connector-j-8.x.x.jar into the lib folder.
+
+4. Open the project in NetBeans.
+   Right-click Libraries -> Add JAR/Folder -> select that jar.
+   Right-click Libraries -> Add Library -> JUnit.
+
+----------------------------------------------------------------
+EVERY TIME YOU RUN IT
+----------------------------------------------------------------
+
+STEP 1 - START THE WEB SERVICE
+   Right-click  src/com/dentalclinic/service/ApiServer.java
+   Choose       Run File          (Shift + F6)
+
+   Wait for this banner in the Output window:
+
+      ==================================================
+       Sunrise Dental Clinic - REST Web Service
+       Listening on http://localhost:8081/api/
+      ==================================================
+
+STEP 2 - CHECK IT IN A BROWSER
+   Open:   http://localhost:8081/api/health
+
+   You should see:
+      {"service":"Sunrise Dental Clinic API","status":"running",
+       "port":8081,"version":"1.0","database":"connected"}
+
+   Every OTHER route needs a sign-in token, so a browser gets
+   {"error":"Missing session token"} on those. That is correct
+   behaviour - patient data must not be readable by anyone who
+   types a URL.
+
+STEP 3 - START THE SWING CLIENT
+   Right-click  src/com/dentalclinic/Main.java
+   Choose       Run File          (Shift + F6)
+
+   Sign in:   admin  / admin123     (administrator)
+              nimali / nimali123    (staff)
+
+   NetBeans keeps both processes running. Switch between their
+   consoles with the dropdown at the top of the Output window.
+
+----------------------------------------------------------------
+WHAT YOU SHOULD SEE
+----------------------------------------------------------------
+
+   Server console : a log line for every click you make
+                    GET /api/dashboard
+                    GET /api/appointments
+                    POST /api/appointments
+
+   Browser        : live JSON at /api/health
+
+   Swing client   : dashboard, then eight screens in the sidebar
+
+All three at once is your evidence that the application is
+genuinely distributed. Screenshot them together.
+
+----------------------------------------------------------------
+TROUBLESHOOTING
+----------------------------------------------------------------
+
+"Cannot reach the clinic server. Is ApiServer running?"
+   The client started before the server. Start ApiServer first.
+
+"Cannot connect to the dental_clinic database"
+   WAMP is not green, or dental_clinic.sql was never run.
+   The exact SQL error is printed in the server's Output window.
+
+"No suitable driver found"
+   The MySQL connector jar is not in Libraries. See setup step 4.
+   The project COMPILES without it and only fails at run time.
+
+"Address already in use: bind"
+   A previous ApiServer is still running. Stop it with the red
+   square in the Output window, or change PORT in ApiServer.java.
+
+404 Not Found - No context found for request
+   The URL has no handler. Valid paths all start /api/ - see the
+   endpoint table in README.md.
+
+Signed out unexpectedly
+   The session timed out after 30 minutes idle. Sign in again.
+
+----------------------------------------------------------------
+RUNNING THE TESTS
+----------------------------------------------------------------
+
+   Alt + F6, or right-click the project -> Test
+
+   Expected:  Tests run: 296,  Failures: 0
+
+   The tests need NO database and NO server running.
+
+----------------------------------------------------------------
+RUNNING THE CLIENT ON A DIFFERENT MACHINE
+----------------------------------------------------------------
+
+   On the server PC, run  ipconfig  and note the IPv4 address.
+   In Main.java change:
+
+      private static final ApiClient API = new ApiClient();
+   to
+      private static final ApiClient API =
+              new ApiClient("http://192.168.1.25:8081");
+
+   That one line is the only change needed. It proves the two
+   processes are genuinely independent.

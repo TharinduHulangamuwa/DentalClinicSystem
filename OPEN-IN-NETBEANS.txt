@@ -1,0 +1,108 @@
+================================================================
+ HOW TO OPEN THIS IN NETBEANS
+================================================================
+
+There are two ways. Try METHOD A first. If NetBeans complains,
+use METHOD B, which always works and takes about two minutes.
+
+----------------------------------------------------------------
+METHOD A - open the folder directly
+----------------------------------------------------------------
+
+1. Unzip DentalClinicSystem-Type01.zip somewhere with NO SPACES
+   in the path, for example  C:\Projects\
+
+2. NetBeans -> File -> Open Project
+3. Browse to the DentalClinicSystem folder and open it.
+
+If NetBeans shows a warning about project problems, click
+"Resolve Project Problems", then "Resolve..." next to each item.
+It will regenerate its build file and ask you to point at the
+JUnit library and the MySQL driver - see SETUP below.
+
+If it will not open, or the folder has no project icon beside it,
+go to METHOD B instead. Nothing is wrong with the code.
+
+----------------------------------------------------------------
+METHOD B - create a fresh project and copy the code in
+----------------------------------------------------------------
+
+This always works.
+
+1. NetBeans -> File -> New Project
+      Category: Java with Ant
+      Project : Java Application
+      Next
+
+2. Project Name:     DentalClinicSystem
+   Project Location: C:\Projects        (no spaces in the path)
+   UNTICK "Create Main Class"
+   Finish
+
+3. Close NetBeans.
+
+4. Open the folder NetBeans just created:
+      C:\Projects\DentalClinicSystem
+
+   Delete the empty  src  folder it made.
+
+   From the unzipped download, copy in:
+      src          (the whole folder)
+      test         (the whole folder)
+      sql          (the whole folder)
+      lib          (the whole folder)
+      README.md
+      HOW-TO-RUN.txt
+
+   Do NOT copy build.xml or nbproject - keep the ones NetBeans
+   made for you.
+
+5. Reopen NetBeans. The project now shows all the packages.
+
+----------------------------------------------------------------
+SETUP - do this whichever method you used
+----------------------------------------------------------------
+
+1. MySQL driver
+   Download from  https://dev.mysql.com/downloads/connector/j/
+   choose "Platform Independent", extract, and copy
+   mysql-connector-j-8.x.x.jar into the project's lib folder.
+
+   Right-click Libraries -> Add JAR/Folder -> pick that jar.
+
+2. JUnit
+   Right-click Libraries -> Add Library -> JUnit (4.x) -> Add.
+
+3. Main class
+   Right-click the project -> Properties -> Run
+   Main Class:  com.dentalclinic.Main
+
+4. Source level (clears the -source 17 warning)
+   Right-click the project -> Properties -> Sources
+   Source/Binary Format:  JDK 17
+
+5. Database
+   Start WampServer (tray icon GREEN), open phpMyAdmin,
+   SQL tab, paste ALL of sql/dental_clinic.sql, click Go.
+
+----------------------------------------------------------------
+CHECK IT WORKS
+----------------------------------------------------------------
+
+   Build:   press F11        -> should say BUILD SUCCESSFUL
+   Test:    press Alt + F6   -> Tests run: 296, Failures: 0
+
+   Then follow HOW-TO-RUN.txt:
+      run ApiServer.java first, then Main.java
+
+----------------------------------------------------------------
+IF THE PROJECT PANEL LOOKS EMPTY
+----------------------------------------------------------------
+
+The Projects tab shows project folders; the Files tab shows the
+raw folder. If you can see the files in the Files tab but the
+Projects tab is empty, the project metadata did not load - use
+METHOD B.
+
+The source code is identical either way. Only NetBeans's own
+bookkeeping files differ.
