@@ -3,7 +3,7 @@
 CIS6003 Advanced Programming — WRIT1
 Cardiff Metropolitan University / ICBT Campus
 
-**Student:** [Your Name]  **ID:** [stXXXXXXXX]
+**Student:** Tharindu Hulangamuwa  **ID:** [st20288713]
 
 Built to **Solution Type 01**: JFrame application → HTTP/REST → Java web
 service → JDBC → WAMP.
